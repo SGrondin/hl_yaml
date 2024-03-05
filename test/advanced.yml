@@ -1,0 +1,7 @@
+hello: world
+<<: !CONFIG simple.yml
+some array:
+  - name: alice
+  - name: bob
+  - <<: !CONFIG imported.yml
+  - name: Eric

@@ -1,0 +1,11 @@
+(library
+  (name test)
+  (inline_tests)
+  (libraries
+    hl-yaml
+  )
+  (preprocess (pps
+    ppx_expect
+  ))
+  (ocamlopt_flags -Oclassic)
+)

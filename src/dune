@@ -1,0 +1,14 @@
+(library
+  (name hl_yaml)
+  (public_name hl-yaml)
+  (libraries
+    yaml
+    yojson
+    lwt ; TODO
+    lwt.unix ; TODO
+  )
+)
+
+(env
+  (dev
+    (flags (:standard -warn-error -A))))

@@ -1,0 +1,26 @@
+opam-version: "2.0"
+maintainer: "Simon Grondin"
+authors: [ "Simon Grondin" ]
+synopsis: "High-level preprocessing wrapper around the yaml library"
+description: """
+"""
+license: "MIT"
+tags: []
+homepage: "https://github.com/SGrondin/hl-yaml"
+dev-repo: "git://github.com/SGrondin/hl-yaml"
+doc: "https://github.com/SGrondin/hl-yaml"
+bug-reports: "https://github.com/SGrondin/hl-yaml/issues"
+depends: [
+  "ocaml" { >= "4.10.0" }
+  "dune" { >= "1.9.0" }
+
+  "yojson"
+  "yaml" { >= "3.2.0" }
+
+  "ppx_expect" { with-test }
+  "ppx_sexp_conv" { with-test }
+  "ppx_custom_printf" { with-test }
+  "ocamlformat" { = "0.25.1" } # Development
+  "ocaml-lsp-server" # Development
+]
+build: ["dune" "build" "-p" name "-j" jobs]
