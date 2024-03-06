@@ -1,52 +1,3 @@
-module type Intf = sig
-  type +'a io
-
-  type options
-
-  val default_options : options
-
-  val make_options :
-    ?get_env_var:(string -> string option) ->
-    ?get_file:(string -> string io) ->
-    ?config_path_relative_to:string ->
-    ?file_path_relative_to:string ->
-    ?enable_includes:bool ->
-    ?enable_imports:bool ->
-    ?allow_unused_anchors:bool ->
-    ?validate_config_path:(string -> bool io) ->
-    ?process_scalar_tag:(tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] io option) ->
-    unit ->
-    options
-
-  module JSON : sig
-    val to_yaml_string : Yojson.Safe.t -> (string, string) result
-  end
-
-  module YAML : sig
-    val of_string : ?options:options -> string -> (Yaml.yaml, string) result io
-
-    val to_yojson : Yaml.value -> Yojson.Safe.t
-
-    val to_string :
-      ?layout_style:Yaml.layout_style ->
-      ?scalar_style:Yaml.scalar_style ->
-      Yaml.yaml ->
-      (string, string) result
-  end
-
-  module Json_spec : sig
-    (** @inline *)
-    include module type of Json_spec
-  end
-
-  val parse :
-    ?options:options ->
-    ?validate:Json_spec.t ->
-    of_yojson:(Yojson.Safe.t -> ('a, string) result) ->
-    string ->
-    ('a, Json_spec.error list) result io
-end
-
 module StringTable = struct
   module StringTable = Hashtbl.Make (struct
     type t = string
@@ -117,7 +68,7 @@ module Make (IO : S.IO) = struct
 
   type options = {
     get_env_var: string -> string option;
-    get_file: string -> string IO.t;
+    get_file: IO.path -> string IO.t;
     config_path_relative_to: string -> string;
     file_path_relative_to: string -> string;
     allow_unused_anchors: bool;
@@ -145,7 +96,7 @@ module Make (IO : S.IO) = struct
 
   let default_options = make_options ()
 
-  module Json_spec = Json_spec
+  module Spec = Spec
 
   module JSON = struct
     let to_yaml_string (json : Yojson.Safe.t) =
@@ -182,7 +133,7 @@ module Make (IO : S.IO) = struct
       | `A array -> `List (List.map to_yojson array)
       | `O pairs -> `Assoc (List.map (fun (key, value) -> key, to_yojson value) pairs)
 
-    type state = {
+    type 'a state = {
       refs: (yaml IO.t * int) StringTable.t;
       env_vars: string StringTable.t;
       files: string IO.t StringTable.t;
@@ -192,7 +143,7 @@ module Make (IO : S.IO) = struct
 
     let failwithf fmt = Format.ksprintf (fun s () -> failwith s) fmt
 
-    let resolve_references state (yaml : yaml) =
+    let resolve_references ~to_path state (yaml : yaml) =
       let process_anchor left right =
         let remove_anchor = function
           | `Scalar ({ anchor = Some _; _ } as scalar) -> `Scalar { scalar with anchor = None }
@@ -220,7 +171,7 @@ module Make (IO : S.IO) = struct
       in
       let get_file filename =
         StringTable.find_or_add state.files filename ~default:(fun () ->
-          filename |> state.options.file_path_relative_to |> state.options.get_file )
+          filename |> state.options.file_path_relative_to |> to_path |> state.options.get_file )
       in
       let make_key key =
         let buf = Buffer.create (String.length key + 10) in
@@ -351,7 +302,9 @@ module Make (IO : S.IO) = struct
           |> snd
       and get_config filename =
         StringTable.find_or_add state.configs filename ~default:(fun () ->
-          let* contents = filename |> state.options.config_path_relative_to |> state.options.get_file in
+          let* contents =
+            filename |> state.options.config_path_relative_to |> to_path |> state.options.get_file
+          in
           match yaml_of_string contents with
           | Ok partial_config -> loop partial_config
           | Error (`Msg msg) -> failwithf "Invalid YAML in !CONFIG %s: %s" filename msg () )
@@ -369,7 +322,7 @@ module Make (IO : S.IO) = struct
       | Ok _ as res -> res
       | Error _ as res -> res
 
-    let of_string ?(options = default_options) str =
+    let of_string ~to_path ?(options = default_options) str =
       match yaml_of_string str with
       | Ok x ->
         let state =
@@ -381,19 +334,19 @@ module Make (IO : S.IO) = struct
             options;
           }
         in
-        resolve_references state x
+        resolve_references ~to_path state x
       | Error (`Msg message) -> IO.return (Error message)
   end
 
-  let parse ?options ?validate:(json_spec = Json_spec.JAny) ~of_yojson:parser contents =
+  let parse ~to_path ?options ?validate:(spec = Spec.JAny) ~of_yojson:parser contents =
     let+ json =
-      let+ res = YAML.of_string ?options contents in
+      let+ res = YAML.of_string ~to_path ?options contents in
       match res >>= wrap Yaml.to_json with
       | Ok x -> Ok (YAML.to_yojson x)
-      | Error message -> Error [ Json_spec.Deserialization { message; attempted = Right contents } ]
+      | Error message -> Error [ Spec.Deserialization { message; attempted = Right contents } ]
     in
     json >>= fun json ->
-    match Json_spec.validate json_spec json with
+    match Spec.validate spec json with
     | [] -> (
       match parser json with
       | Ok _ as x -> x
@@ -401,24 +354,58 @@ module Make (IO : S.IO) = struct
     | errors -> Error errors
 end
 
-module Make_Lwt (Lwt : S.S_Lwt) (Lwt_io : S.S_Lwt_io with type 'a lwt_t := 'a Lwt.t) :
-  Intf with type 'a io := 'a Lwt.t = struct
-  include Make (struct
-    include Lwt
+module type Intf = sig
+  type +'a io
 
-    let map_s f l =
-      let rec inner acc = function
-        | [] -> List.rev acc |> Lwt.return
-        | hd :: tl -> Lwt.bind (Lwt.apply f hd) (fun r -> (inner [@ocaml.tailcall]) (r :: acc) tl)
-      in
-      inner [] l
+  type options
 
-    let read_file filename =
-      Lwt_io.with_file ~flags:Unix.[ O_RDONLY; O_NONBLOCK ] ~mode:Input filename Lwt_io.read
-  end)
+  type path
+
+  val default_options : options
+
+  val make_options :
+    ?get_env_var:(string -> string option) ->
+    ?get_file:(path -> string io) ->
+    ?config_path_relative_to:string ->
+    ?file_path_relative_to:string ->
+    ?enable_includes:bool ->
+    ?enable_imports:bool ->
+    ?allow_unused_anchors:bool ->
+    ?validate_config_path:(string -> bool io) ->
+    ?process_scalar_tag:(tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] io option) ->
+    unit ->
+    options
+
+  module JSON : sig
+    val to_yaml_string : Yojson.Safe.t -> (string, string) result
+  end
+
+  module YAML : sig
+    val of_string : ?options:options -> string -> (Yaml.yaml, string) result io
+
+    val to_yojson : Yaml.value -> Yojson.Safe.t
+
+    val to_string :
+      ?layout_style:Yaml.layout_style ->
+      ?scalar_style:Yaml.scalar_style ->
+      Yaml.yaml ->
+      (string, string) result
+  end
+
+  module Spec : sig
+    (** @inline *)
+    include module type of Spec
+  end
+
+  val parse :
+    ?options:options ->
+    ?validate:Spec.t ->
+    of_yojson:(Yojson.Safe.t -> ('a, string) result) ->
+    string ->
+    ('a, Spec.error list) result io
 end
 
-module Unix : Intf with type 'a io := 'a = Make (struct
+module Non_Monadic = struct
   type +'a t = 'a
 
   let return x = x
@@ -436,8 +423,99 @@ module Unix : Intf with type 'a io := 'a = Make (struct
   let return_nil = []
 
   let map_s f ll = List.map f ll
+end
 
-  let read_file filename =
-    let chan = In_channel.open_bin filename in
-    Fun.protect (fun () -> In_channel.input_all chan) ~finally:(fun () -> In_channel.close chan)
-end)
+module Make_Lwt (Lwt : S.S_Lwt) (Lwt_io : S.S_Lwt_io with type 'a lwt_t := 'a Lwt.t) :
+  Intf with type 'a io := 'a Lwt.t and type path := string = struct
+  module M = Make (struct
+    include Lwt
+
+    type path = string
+
+    let map_s f l =
+      let rec inner acc = function
+        | [] -> List.rev acc |> Lwt.return
+        | hd :: tl -> Lwt.bind (Lwt.apply f hd) (fun r -> (inner [@ocaml.tailcall]) (r :: acc) tl)
+      in
+      inner [] l
+
+    let read_file filename =
+      Lwt_io.with_file ~flags:Unix.[ O_RDONLY; O_NONBLOCK ] ~mode:Input filename Lwt_io.read
+  end)
+
+  include M
+
+  module YAML = struct
+    include M.YAML
+
+    let of_string ?options str = M.YAML.of_string ~to_path:Fun.id ?options str
+  end
+
+  let parse ?options ?validate ~of_yojson contents =
+    M.parse ~to_path:Fun.id ?options ?validate ~of_yojson contents
+end
+
+module type Intf_Eio = sig
+  include Intf
+
+  module YAML : sig
+    include module type of YAML
+
+    val of_string : cwd:path -> ?options:options -> string -> (Yaml.yaml, string) result io
+  end
+
+  val parse :
+    cwd:path ->
+    ?options:options ->
+    ?validate:Spec.t ->
+    of_yojson:(Yojson.Safe.t -> ('a, string) result) ->
+    string ->
+    ('a, Spec.error list) result io
+end
+
+module Make_Eio (Eio : S.S_Eio) :
+  Intf_Eio with type 'a io := 'a and type path := Eio.Fs.dir_ty Eio.Path.t = struct
+  module M = Make (struct
+    include Non_Monadic
+
+    type path = Eio.Fs.dir_ty Eio.Path.t
+
+    let read_file path = Eio.Path.load path
+  end)
+
+  include M
+
+  module YAML = struct
+    include M.YAML
+
+    let of_string ~cwd ?options str = M.YAML.of_string ~to_path:Eio.Path.((fun s -> cwd / s)) ?options str
+  end
+
+  let parse ~cwd ?options ?validate ~of_yojson contents =
+    M.parse ~to_path:Eio.Path.((fun s -> cwd / s)) ?options ?validate ~of_yojson contents
+end
+
+module Unix : Intf with type 'a io := 'a = struct
+  module M = Make (struct
+    include Non_Monadic
+
+    type path = string
+
+    let read_file filename =
+      let chan = In_channel.open_bin filename in
+      Fun.protect (fun () -> In_channel.input_all chan) ~finally:(fun () -> In_channel.close chan)
+  end)
+
+  type path = string
+
+  include M
+
+  module YAML = struct
+    include M.YAML
+
+    let of_string ?options str = M.YAML.of_string ~to_path:Fun.id ?options str
+  end
+
+  let parse ?options ?validate ~of_yojson contents =
+    M.parse ~to_path:Fun.id ?options ?validate ~of_yojson contents
+end

@@ -1,7 +1,7 @@
 type object_entry = {
   key: string;
   required: bool;
-  json_spec: t;
+  spec: t;
 }
 
 and schema_keys

@@ -1,12 +1,15 @@
-open Hl_yaml.Unix
+module M = Hl_yaml.Make_Eio (Eio)
+open M
 
 let ok_or_failwith = function
 | Ok x -> x
 | Error s -> failwith s
 
-let%expect_test "Config YAML processing - Stdlib" =
+let%expect_test "Config YAML processing - Eio" =
+  Eio_main.run @@ fun env ->
+  let cwd = Eio.Stdenv.fs env in
   let test ?options raw =
-    let parsed = YAML.of_string ?options raw in
+    let parsed = YAML.of_string ~cwd ?options raw in
     let () =
       match parsed with
       | Ok x ->

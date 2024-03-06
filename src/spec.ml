@@ -29,7 +29,7 @@ end
 type object_entry = {
   key: string;
   required: bool;
-  json_spec: t;
+  spec: t;
 }
 
 and schema_keys = object_entry StringMap.t
@@ -217,8 +217,8 @@ let get_name ll =
       | _ -> None)
     ll
 
-let rec validate ~path (json : Yojson.Safe.t) json_spec ~nullable =
-  match json_spec, json with
+let rec validate ~path (json : Yojson.Safe.t) spec ~nullable =
+  match spec, json with
   | JNull, `Null -> []
   | _, `Null when nullable -> []
   | JAny, _ -> []
@@ -246,17 +246,17 @@ let rec validate ~path (json : Yojson.Safe.t) json_spec ~nullable =
     StringMap.fold2 passed keys ~init:[] ~f:(fun ~key ~data acc ->
       match data with
       | `Left _ when reject_extras -> Extraneous { path = Dot key :: path; name = get_name ll } :: acc
-      | `Right { json_spec; required = true; _ } ->
-        Missing { path = Dot key :: path; name = get_name ll; missing = json_spec } :: acc
+      | `Right { spec; required = true; _ } ->
+        Missing { path = Dot key :: path; name = get_name ll; missing = spec } :: acc
       | `Left _
        |`Right _ ->
         acc
-      | `Both (json, { json_spec; required; _ }) ->
-        validate ~path:(Dot key :: path) json json_spec ~nullable:(not required) @ acc )
+      | `Both (json, { spec; required; _ }) ->
+        validate ~path:(Dot key :: path) json spec ~nullable:(not required) @ acc )
     |> List.rev
   | _, (`Intlit _ | `Tuple _ | `Variant _) ->
-    validate ~path (Yojson.Safe.to_basic json :> Yojson.Safe.t) json_spec ~nullable
-  | _, `Assoc ll -> [ Type { path; name = get_name ll; expected = json_spec; found = json } ]
+    validate ~path (Yojson.Safe.to_basic json :> Yojson.Safe.t) spec ~nullable
+  | _, `Assoc ll -> [ Type { path; name = get_name ll; expected = spec; found = json } ]
   | JAtom, _
    |JNull, _
    |JBool, _
@@ -268,7 +268,7 @@ let rec validate ~path (json : Yojson.Safe.t) json_spec ~nullable =
    |JArray _, _
    |JObject _, _
    |JSchema _, _ ->
-    [ Type { path; name = None; expected = json_spec; found = json } ]
+    [ Type { path; name = None; expected = spec; found = json } ]
 
-let validate ?(path = [ Dot "$" ]) ?(nullable = false) json_spec (json : Yojson.Safe.t) =
-  validate ~path (json : Yojson.Safe.t) json_spec ~nullable
+let validate ?(path = [ Dot "$" ]) ?(nullable = false) spec (json : Yojson.Safe.t) =
+  validate ~path (json : Yojson.Safe.t) spec ~nullable

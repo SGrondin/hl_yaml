@@ -1,4 +1,4 @@
-open Hl_yaml__.Json_spec
+open Hl_yaml.Unix.Spec
 
 let%expect_test "Validations" =
   let test json spec =
@@ -48,7 +48,7 @@ let%expect_test "Validations" =
 
   test
     (`Assoc [ "extra", `List [] ])
-    (make_schema ~name:"foo" ~reject_extras:true [ { key = "abc"; required = true; json_spec = JAtom } ]);
+    (make_schema ~name:"foo" ~reject_extras:true [ { key = "abc"; required = true; spec = JAtom } ]);
   [%expect {|
     Extraneous key: $.extra
     Missing key: $.abc (String) |}];
@@ -76,12 +76,12 @@ let%expect_test "Validations" =
       ] )
     (make_schema ~name:"foo" ~reject_extras:false
        [
-         { key = "a"; required = true; json_spec = JArray JAtom };
-         { key = "b"; required = true; json_spec = JOneOrArray JAtom };
-         { key = "c d"; required = true; json_spec = JOneOrArray JAtom };
-         { key = "e"; required = false; json_spec = JBool };
-         { key = "f"; required = false; json_spec = JBool };
-         { key = "g"; required = true; json_spec = JBool };
+         { key = "a"; required = true; spec = JArray JAtom };
+         { key = "b"; required = true; spec = JOneOrArray JAtom };
+         { key = "c d"; required = true; spec = JOneOrArray JAtom };
+         { key = "e"; required = false; spec = JBool };
+         { key = "f"; required = false; spec = JBool };
+         { key = "g"; required = true; spec = JBool };
        ] );
   [%expect
     {|

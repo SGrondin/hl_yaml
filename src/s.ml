@@ -43,8 +43,36 @@ module type S_Lwt_io = sig
   val read : ?count:int -> input_channel -> string lwt_t
 end
 
+module type S_Eio = sig
+  module Resource : sig
+    type ('t, -'tags) handler
+
+    type -'tags t = T : ('t * ('t, 'tags) handler) -> 'tags t
+  end
+
+  module Std : sig
+    type 'a r = 'a Resource.t
+  end
+
+  module Fs : sig
+    type dir_ty = [ `Dir ]
+
+    type 'a dir = ([> dir_ty ] as 'a) Std.r
+  end
+
+  module Path : sig
+    type 'a t = 'a Fs.dir * string
+
+    val load : 'a t -> string
+
+    val ( / ) : 'a t -> string -> 'a t
+  end
+end
+
 module type IO = sig
   type +'a t
+
+  type path
 
   val return : 'a -> 'a t
 
@@ -60,5 +88,5 @@ module type IO = sig
 
   val map_s : ('a -> 'b t) -> 'a list -> 'b list t
 
-  val read_file : string -> string t
+  val read_file : path -> string t
 end

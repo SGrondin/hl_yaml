@@ -18,9 +18,10 @@ depends: [
   "yaml" { >= "3.2.0" }
 
   "ppx_expect" { with-test }
-  "ppx_sexp_conv" { with-test }
-  "ppx_custom_printf" { with-test }
-  "ocamlformat" { = "0.25.1" } # Development
-  "ocaml-lsp-server" # Development
+  "lwt" { with-test }
+  "eio_main" { with-test }
+
+  # "ocamlformat" { = "0.25.1" } # Development
+  # "ocaml-lsp-server" # Development
 ]
 build: ["dune" "build" "-p" name "-j" jobs]
