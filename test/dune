@@ -3,6 +3,8 @@
   (inline_tests)
   (libraries
     hl-yaml
+    lwt
+    lwt.unix
   )
   (preprocess (pps
     ppx_expect

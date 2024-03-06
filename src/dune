@@ -2,10 +2,9 @@
   (name hl_yaml)
   (public_name hl-yaml)
   (libraries
+    unix
     yaml
     yojson
-    lwt ; TODO
-    lwt.unix ; TODO
   )
 )
 

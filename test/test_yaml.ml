@@ -1,5 +1,5 @@
 open Lwt.Syntax
-open Hl_yaml
+include Hl_yaml.Make_Lwt (Lwt) (Lwt_io)
 
 module Expect_test_config : Expect_test_config_types.S with module IO = Lwt = struct
   module IO = Lwt

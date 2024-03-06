@@ -7,12 +7,6 @@ module StringMap = struct
 
   include StringMap
 
-  let set map ~key ~data = StringMap.add key data map
-
-  let add map ~key ~data = if StringMap.mem key map then `Duplicate else `Ok (set map ~key ~data)
-
-  let iteri map ~f = StringMap.to_seq map |> Seq.iter (fun (key, data) -> f ~key ~data)
-
   let fold2 m1 m2 ~init ~f =
     let acc = ref init in
     let _map =
@@ -124,7 +118,7 @@ let make_enum expected =
   JEnum { expected; json_types; type_description }
 
 let make_schema ~name ~reject_extras ll =
-  let keys = List.fold_left (fun acc data -> StringMap.set acc ~key:data.key ~data) StringMap.empty ll in
+  let keys = List.fold_left (fun acc data -> StringMap.add data.key data acc) StringMap.empty ll in
   JSchema { name; reject_extras; keys }
 
 type step =
@@ -248,9 +242,7 @@ let rec validate ~path (json : Yojson.Safe.t) json_spec ~nullable =
   | JObject nested, `Assoc ll ->
     List.concat_map (fun (key, json) -> validate ~path:(Dot key :: path) json nested ~nullable:false) ll
   | JSchema { keys; reject_extras; _ }, `Assoc ll ->
-    let passed =
-      List.fold_left (fun acc (key, json) -> StringMap.set acc ~key ~data:json) StringMap.empty ll
-    in
+    let passed = List.fold_left (fun acc (key, json) -> StringMap.add key json acc) StringMap.empty ll in
     StringMap.fold2 passed keys ~init:[] ~f:(fun ~key ~data acc ->
       match data with
       | `Left _ when reject_extras -> Extraneous { path = Dot key :: path; name = get_name ll } :: acc
