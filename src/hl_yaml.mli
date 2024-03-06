@@ -49,3 +49,5 @@ end
 
 module Make_Lwt : functor (Lwt : S.S_Lwt) (Lwt_io : S.S_Lwt_io with type 'a lwt_t := 'a Lwt.t) ->
   Intf with type 'a io := 'a Lwt.t
+
+module Unix : Intf with type 'a io := 'a

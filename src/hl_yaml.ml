@@ -1,5 +1,3 @@
-open S
-
 module type Intf = sig
   type +'a io
 
@@ -110,7 +108,7 @@ let show_yaml_in_flatten_error yaml =
 
 let wrap f x = f x |> Result.map_error (fun (`Msg s) -> s)
 
-module Make (IO : IO) = struct
+module Make (IO : S.IO) = struct
   let ( let* ) = IO.bind
 
   let ( let+ ) f x = IO.map x f
@@ -403,7 +401,7 @@ module Make (IO : IO) = struct
     | errors -> Error errors
 end
 
-module Make_Lwt (Lwt : S_Lwt) (Lwt_io : S_Lwt_io with type 'a lwt_t := 'a Lwt.t) :
+module Make_Lwt (Lwt : S.S_Lwt) (Lwt_io : S.S_Lwt_io with type 'a lwt_t := 'a Lwt.t) :
   Intf with type 'a io := 'a Lwt.t = struct
   include Make (struct
     include Lwt
@@ -419,3 +417,27 @@ module Make_Lwt (Lwt : S_Lwt) (Lwt_io : S_Lwt_io with type 'a lwt_t := 'a Lwt.t)
       Lwt_io.with_file ~flags:Unix.[ O_RDONLY; O_NONBLOCK ] ~mode:Input filename Lwt_io.read
   end)
 end
+
+module Unix : Intf with type 'a io := 'a = Make (struct
+  type +'a t = 'a
+
+  let return x = x
+
+  let map f x = f x
+
+  let bind x f = f x
+
+  let catch f catch =
+    try f () with
+    | exn -> catch exn
+
+  let return_true = true
+
+  let return_nil = []
+
+  let map_s f ll = List.map f ll
+
+  let read_file filename =
+    let chan = In_channel.open_bin filename in
+    Fun.protect (fun () -> In_channel.input_all chan) ~finally:(fun () -> In_channel.close chan)
+end)

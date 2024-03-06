@@ -24,7 +24,6 @@ let%expect_test "Config YAML processing" =
         x |> YAML.to_string ~layout_style:`Block ~scalar_style:`Plain |> ok_or_failwith |> Lwt_io.printl
       | Error s -> Lwt_io.printlf "!ERROR! %s" s
     in
-
     Lwt_io.flush_all ()
   in
 
@@ -72,8 +71,8 @@ let%expect_test "Config YAML processing" =
     hello: world
     abc: def
     some array:
-    - name: alice
-    - name: bob
+    - name: Alice
+    - name: Bob
     - name: Charlie
     - name: Diane
     - name: Eric |}];
@@ -95,8 +94,8 @@ let%expect_test "Config YAML processing" =
     hello: world
     abc: def
     some array:
-    - name: alice
-    - name: bob
+    - name: Alice
+    - name: Bob
     - name: Charlie
     - name: Diane
     - name: Eric |}];

@@ -1,7 +1,7 @@
 hello: world
 <<: !CONFIG simple.yml
 some array:
-  - name: alice
-  - name: bob
+  - name: Alice
+  - name: Bob
   - <<: !CONFIG imported.yml
   - name: Eric
