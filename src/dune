@@ -6,6 +6,9 @@
     yaml
     yojson
   )
+  (preprocess (pps
+    ppx_deriving_yojson
+  ))
 )
 
 (env

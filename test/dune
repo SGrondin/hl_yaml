@@ -3,12 +3,16 @@
   (inline_tests)
   (libraries
     hl-yaml
+    core
     eio_main
     lwt
     lwt.unix
   )
   (preprocess (pps
     ppx_expect
+    ppx_sexp_conv
+    ppx_custom_printf
+    ppx_deriving_yojson
   ))
   (ocamlopt_flags -Oclassic)
 )

@@ -1,20 +1,6 @@
 open Lwt.Syntax
-
-open Hl_yaml.Make_Lwt (Lwt) (Lwt_io)
-
-module Expect_test_config : Expect_test_config_types.S with module IO = Lwt = struct
-  module IO = Lwt
-
-  let sanitize s = s
-
-  let run f = Lwt_main.run (f ())
-
-  let upon_unreleasable_issue = `CR
-end
-
-let ok_or_failwith = function
-| Ok x -> x
-| Error s -> failwith s
+open Utils.Lwt_expect_tests
+module Y = Hl_yaml.Make_Lwt (Lwt) (Lwt_io)
 
 let config1 =
   {|
@@ -73,11 +59,14 @@ all_connections:
 
 let%expect_test "Config YAML processing" =
   let test ?options raw =
-    let* parsed = YAML.of_string ?options raw in
+    let* parsed = Y.YAML.of_string ?options raw in
     let* () =
       match parsed with
       | Ok x ->
-        x |> YAML.to_string ~layout_style:`Block ~scalar_style:`Plain |> ok_or_failwith |> Lwt_io.printl
+        x
+        |> Y.YAML.to_string ~layout_style:`Block ~scalar_style:`Plain
+        |> Utils.ok_or_failwith
+        |> Lwt_io.printl
       | Error s -> Lwt_io.printlf "!ERROR! %s" s
     in
 
@@ -115,7 +104,7 @@ let%expect_test "Config YAML processing" =
           (Lwt.return (`YAML (`O Yaml.{ m_anchor = None; m_tag = None; m_implicit = true; m_members })))
       | _ -> None
     in
-    test ~options:(make_options ~process_scalar_tag ()) "foo: !PLUS_FIVE 2\nbar: !SPREAD_IT abcdef"
+    test ~options:(Y.make_options ~process_scalar_tag ()) "foo: !PLUS_FIVE 2\nbar: !SPREAD_IT abcdef"
   in
   [%expect {|
     foo: 7
@@ -130,13 +119,13 @@ let%expect_test "Config YAML processing" =
   let* () = test "&x: 5\nfoo: bar" in
   [%expect {| !ERROR! YAML anchor &x is never used |}];
 
-  let* () = test ~options:(make_options ~allow_unused_anchors:true ()) "&x: 5\nfoo: bar" in
+  let* () = test ~options:(Y.make_options ~allow_unused_anchors:true ()) "&x: 5\nfoo: bar" in
   [%expect {| foo: bar |}];
 
   let* () =
     test config1
       ~options:
-        (make_options
+        (Y.make_options
            ~get_env_var:(function
              | "foo" -> Some "bar "
              | "PORT" -> Some "456"
@@ -192,7 +181,7 @@ let%expect_test "Config YAML processing" =
   let* () =
     test config1
       ~options:
-        (make_options ~enable_includes:false
+        (Y.make_options ~enable_includes:false
            ~get_env_var:(function
              | "foo" -> Some "bar "
              | "PORT" -> Some "456"

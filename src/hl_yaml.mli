@@ -49,6 +49,11 @@ module type Intf = sig
     ('a, Spec.error list) result io
 end
 
+module Spec : sig
+  (** @inline *)
+  include module type of Spec
+end
+
 module Unix : Intf with type 'a io := 'a
 
 module Make_Lwt : functor (Lwt : S.S_Lwt) (Lwt_io : S.S_Lwt_io with type 'a lwt_t := 'a Lwt.t) ->

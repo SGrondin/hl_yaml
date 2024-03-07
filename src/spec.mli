@@ -26,6 +26,7 @@ and t =
       reject_extras: bool;
       keys: schema_keys;
     }
+[@@deriving to_yojson]
 
 val make_enum : Yojson.Basic.t list -> t
 
@@ -36,25 +37,28 @@ val to_string : t -> string
 type step =
   | Dot of string
   | Index of int
+[@@deriving to_yojson]
+
+type path = step list [@@deriving to_yojson]
 
 type error =
   | Extraneous of {
-      path: step list;
+      path: path;
       name: string option;
     }
   | Missing of {
-      path: step list;
+      path: path;
       name: string option;
       missing: t;
     }
   | Type of {
-      path: step list;
+      path: path;
       name: string option;
       expected: t;
       found: Yojson.Safe.t;
     }
   | Incorrect_value of {
-      path: step list;
+      path: path;
       name: string option;
       expected: Yojson.Basic.t list;
       found: Yojson.Basic.t;
@@ -63,7 +67,8 @@ type error =
       message: string;
       attempted: (Yojson.Safe.t, string) Either.t;
     }
+[@@deriving to_yojson]
 
-val validate : ?path:step list -> ?nullable:bool -> t -> Yojson.Safe.t -> error list
+val validate : ?path:path -> ?nullable:bool -> t -> Yojson.Safe.t -> error list
 
 val render_error : ?emphasis:(string -> string) -> error -> string

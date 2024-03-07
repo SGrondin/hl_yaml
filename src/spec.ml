@@ -24,6 +24,9 @@ module StringMap = struct
         m1 m2
     in
     !acc
+
+  let to_yojson f map : Yojson.Safe.t =
+    `Assoc (StringMap.fold (fun key data acc -> (key, f data) :: acc) map [])
 end
 
 type object_entry = {
@@ -35,7 +38,7 @@ type object_entry = {
 and schema_keys = object_entry StringMap.t
 
 and enum = {
-  expected: Yojson.Basic.t list;
+  expected: (Yojson.Basic.t[@to_yojson (fun (x : Yojson.Basic.t) -> (x :> Yojson.Safe.t))]) list;
   json_types: t list;
   type_description: string;
 }
@@ -58,6 +61,7 @@ and t =
       reject_extras: bool;
       keys: schema_keys;
     }
+[@@deriving to_yojson]
 
 let rec of_yojson : Yojson.Safe.t -> t = function
 | `Null -> JNull
@@ -125,24 +129,57 @@ type step =
   | Dot of string
   | Index of int
 
+let is_brackets s =
+  String.exists
+    (function
+      | 'a' .. 'z'
+       |'A' .. 'Z'
+       |'0' .. '9'
+       |'_' ->
+        false
+      | _ -> true)
+    s
+
+let step_to_yojson : step -> Yojson.Safe.t = function
+| Dot s when is_brackets s -> `Assoc [ "type", `String "key"; "key", `String s ]
+| Dot s -> `Assoc [ "type", `String "dot"; "dot", `String s ]
+| Index i -> `Assoc [ "type", `String "index"; "index", `Int i ]
+
+type path = step list [@@deriving to_yojson]
+
+let path_to_string path =
+  let fmt_step fmt = function
+    | Dot s when is_brackets s -> Format.fprintf fmt "[%S]" s
+    | Dot s -> Format.fprintf fmt ".%s" s
+    | Index i -> Format.fprintf fmt "[%d]" i
+  in
+  let render fmt path =
+    match List.rev path with
+    | Dot s :: ll ->
+      Format.fprintf fmt "%s" s;
+      List.iter (fmt_step fmt) ll
+    | ll -> List.iter (fmt_step fmt) ll
+  in
+  Format.asprintf "%a" render path
+
 type error =
   | Extraneous of {
-      path: step list;
+      path: path;
       name: string option;
     }
   | Missing of {
-      path: step list;
+      path: path;
       name: string option;
       missing: t;
     }
   | Type of {
-      path: step list;
+      path: path;
       name: string option;
       expected: t;
       found: Yojson.Safe.t;
     }
   | Incorrect_value of {
-      path: step list;
+      path: path;
       name: string option;
       expected: Yojson.Basic.t list;
       found: Yojson.Basic.t;
@@ -151,6 +188,55 @@ type error =
       message: string;
       attempted: (Yojson.Safe.t, string) Either.t;
     }
+
+let error_to_yojson : error -> Yojson.Safe.t = function
+| Extraneous { path; name } ->
+  `Assoc
+    [
+      "type", `String "extraneous";
+      "name", [%to_yojson: string option] name;
+      "path", `String (path_to_string path);
+      "path_parts", path_to_yojson path;
+    ]
+| Missing { path; name; missing } ->
+  `Assoc
+    [
+      "type", `String "missing";
+      "name", [%to_yojson: string option] name;
+      "path", `String (path_to_string path);
+      "path_parts", path_to_yojson path;
+      "missing", [%to_yojson: t] missing;
+    ]
+| Type { path; name; expected; found } ->
+  `Assoc
+    [
+      "type", `String "type";
+      "name", [%to_yojson: string option] name;
+      "path", `String (path_to_string path);
+      "path_parts", path_to_yojson path;
+      "expected", [%to_yojson: t] expected;
+      "found", found;
+    ]
+| Incorrect_value { path; name; expected; found } ->
+  `Assoc
+    [
+      "type", `String "missing";
+      "name", [%to_yojson: string option] name;
+      "path", `String (path_to_string path);
+      "path_parts", path_to_yojson path;
+      "expected", `List (expected :> Yojson.Safe.t list);
+      "found", (found :> Yojson.Safe.t);
+    ]
+| Deserialization { message; attempted } ->
+  `Assoc
+    [
+      "type", `String "deserialization";
+      "message", `String message;
+      ( "attempted",
+        match attempted with
+        | Left json -> json
+        | Right s -> `String s );
+    ]
 
 let render_error ?emphasis error =
   let emphasis fmt s =
@@ -161,31 +247,7 @@ let render_error ?emphasis error =
     | None -> ()
     | Some s -> Format.fprintf fmt " (in %a)" emphasis s
   in
-  let fmt_path fmt path =
-    let fmt_step fmt = function
-      | Dot s
-        when String.exists
-               (function
-                 | 'a' .. 'z'
-                  |'A' .. 'Z'
-                  |'0' .. '9'
-                  |'_' ->
-                   false
-                 | _ -> true)
-               s ->
-        Format.fprintf fmt "[%S]" s
-      | Dot s -> Format.fprintf fmt ".%s" s
-      | Index i -> Format.fprintf fmt "[%d]" i
-    in
-    let render fmt path =
-      match List.rev path with
-      | Dot s :: ll ->
-        Format.fprintf fmt "%s" s;
-        List.iter (fmt_step fmt) ll
-      | ll -> List.iter (fmt_step fmt) ll
-    in
-    Format.fprintf fmt "%a" emphasis (Format.asprintf "%a" render path)
-  in
+  let fmt_path fmt path = Format.fprintf fmt "%a" emphasis (path_to_string path) in
   let key_or_option fmt = function
     | []
      |[ _ ] ->

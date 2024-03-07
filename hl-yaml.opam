@@ -17,7 +17,11 @@ depends: [
   "yojson"
   "yaml" { >= "3.2.0" }
 
+  "core" { with-test }
   "ppx_expect" { with-test }
+  "ppx_sexp_conv" { with-test }
+  "ppx_deriving_yojson" { with-test }
+  "ppx_custom_printf" { with-test }
   "lwt" { with-test }
   "eio_main" { with-test }
 

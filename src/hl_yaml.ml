@@ -354,6 +354,8 @@ module Make (IO : S.IO) = struct
     | errors -> Error errors
 end
 
+module Spec = Spec
+
 module type Intf = sig
   type +'a io
 
