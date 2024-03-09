@@ -3,15 +3,22 @@ maintainer: "Simon Grondin"
 authors: [ "Simon Grondin" ]
 synopsis: "High-level preprocessing wrapper around the yaml library"
 description: """
+High Level YAML (\"HL YAML\") is a lightweight all-in-one tool to read, parse, preprocess, validate and deserialize YAML files.
+
+For example, it allows configuration files written in YAML to reference environment variables, inline files, and import other configuration files.
+Other features include the `<<:` \"operator\" similar to OCaml's `include`, and reusing config fragments through anchors (`&`) and references (`*`).
+Features can be disabled individually and new ones added to serve specific use cases.
+
+For IO, it can use Lwt, Eio, or the standard library.
 """
 license: "MIT"
 tags: []
-homepage: "https://github.com/SGrondin/hl-yaml"
-dev-repo: "git://github.com/SGrondin/hl-yaml"
-doc: "https://github.com/SGrondin/hl-yaml"
-bug-reports: "https://github.com/SGrondin/hl-yaml/issues"
+homepage: "https://github.com/SGrondin/hl_yaml"
+dev-repo: "git://github.com/SGrondin/hl_yaml"
+doc: "https://github.com/SGrondin/hl_yaml"
+bug-reports: "https://github.com/SGrondin/hl_yaml/issues"
 depends: [
-  "ocaml" { >= "4.10.0" }
+  "ocaml" { >= "5.0.0" }
   "dune" { >= "1.9.0" }
 
   "yojson"

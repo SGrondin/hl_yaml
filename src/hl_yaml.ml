@@ -52,7 +52,7 @@ let rec safe_yaml_to_string ?(len = 256 * 1024) ?layout_style ?scalar_style yaml
     safe_yaml_to_string ~len:(len * 2) ?layout_style ?scalar_style yaml
   | x -> x
 
-let show_yaml_in_flatten_error yaml =
+let show_yaml_in_error yaml =
   match safe_yaml_to_string yaml with
   | Ok s -> s
   | Error (`Msg msg) -> failwith ("Invalid YAML to flatten: " ^ msg)
@@ -74,23 +74,26 @@ module Make (IO : S.IO) = struct
     config_path_filter_map: string -> string option IO.t;
     file_path_filter_map: string -> string option IO.t;
     allow_unused_anchors: bool;
-    enable_redefinable_anchors: bool;
+    allow_redefining_anchors: bool;
     enable_includes: bool;
+    enable_conditional_includes: bool;
     enable_imports: bool;
     process_scalar_tag: tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] IO.t option;
   }
 
   let make_options ?get_env_var ?get_file ?config_path_filter_map ?file_path_filter_map ?enable_includes
-    ?enable_imports ?allow_unused_anchors ?enable_redefinable_anchors ?process_scalar_tag () =
+    ?enable_conditional_includes ?enable_imports ?allow_unused_anchors ?allow_redefining_anchors
+    ?process_scalar_tag () =
     {
       get_env_var = Option.value get_env_var ~default:Sys.getenv_opt;
       get_file = Option.value get_file ~default:IO.read_file;
       config_path_filter_map = Option.value config_path_filter_map ~default:(fun s -> IO.return (Some s));
       file_path_filter_map = Option.value file_path_filter_map ~default:(fun s -> IO.return (Some s));
       enable_includes = Option.value enable_includes ~default:true;
+      enable_conditional_includes = Option.value enable_conditional_includes ~default:true;
       enable_imports = Option.value enable_imports ~default:true;
       allow_unused_anchors = Option.value allow_unused_anchors ~default:false;
-      enable_redefinable_anchors = Option.value enable_redefinable_anchors ~default:false;
+      allow_redefining_anchors = Option.value allow_redefining_anchors ~default:false;
       process_scalar_tag = Option.value process_scalar_tag ~default:(fun ~tag:_ _ -> None);
     }
 
@@ -159,7 +162,7 @@ module Make (IO : S.IO) = struct
             let data = right, 0 in
             match StringTable.add state.refs ~key ~data with
             | `Ok -> remove_anchor left
-            | `Duplicate when state.options.enable_redefinable_anchors ->
+            | `Duplicate when state.options.allow_redefining_anchors ->
               StringTable.replace state.refs key data;
               remove_anchor left
             | `Duplicate -> failwithf "Duplicate YAML anchor name &%s" key () )
@@ -167,11 +170,13 @@ module Make (IO : S.IO) = struct
         in
         left, right
       in
-      let get_env_var name =
+      let get_env_var ?default name =
         StringTable.find_or_add state.env_vars name ~default:(fun () ->
-          match state.options.get_env_var name with
-          | Some x -> x
-          | None -> failwith ("Environment variable requested by YAML config not found: " ^ name) )
+          match state.options.get_env_var name, default with
+          | Some x, _
+           |None, Some x ->
+            x
+          | None, None -> failwith ("Environment variable requested by YAML config not found: " ^ name) )
       in
       let get_file ~tag filename =
         StringTable.find_or_add state.files filename ~default:(fun () ->
@@ -203,8 +208,18 @@ module Make (IO : S.IO) = struct
         | `Scalar { tag = Some "!IF_NOT_DEF"; value; _ } -> not (env_var_exists value), "!IF_NOT_DEF"
         | `Scalar { value = "<<"; _ } -> true, "<<"
         | yaml ->
-          failwithf "YAML processing error in parse_flatten. Please report this bug. Unexpected: %s"
-            (show_yaml_in_flatten_error yaml) ()
+          failwithf "YAML processing error in check_flatten. Please report this bug. Unexpected: %s"
+            (show_yaml_in_error yaml) ()
+      in
+      let check_includes_status = function
+        | `Scalar { value = "<<"; _ } -> state.options.enable_includes
+        | `Scalar { tag = Some "!IF_DEF"; _ }
+         |`Scalar { tag = Some "!IF_NOT_DEF"; _ } ->
+          state.options.enable_conditional_includes
+        | yaml ->
+          failwithf
+            "YAML processing error in check_includes_status. Please report this bug. Unexpected: %s"
+            (show_yaml_in_error yaml) ()
       in
       let rec loop : yaml -> yaml IO.t = function
         | `A ({ s_members; _ } as sequence) as original ->
@@ -213,7 +228,7 @@ module Make (IO : S.IO) = struct
               | `O { m_members = [ ((`Scalar { tag = Some "!IF_DEF"; _ } as left), right) ]; _ }
                |`O { m_members = [ ((`Scalar { tag = Some "!IF_NOT_DEF"; _ } as left), right) ]; _ }
                |`O { m_members = [ ((`Scalar { value = "<<"; _ } as left), right) ]; _ }
-                when state.options.enable_includes -> (
+                when check_includes_status left -> (
                 (* !IF_DEF, !IF_NOT_DEF, or "<<" *)
                 let* right = process_anchor left (loop right) |> snd in
                 match check_flatten left, right with
@@ -243,7 +258,7 @@ module Make (IO : S.IO) = struct
                   failwithf
                     "YAML error: right hand side of '%s' should be a list of key-value pairs but found:\n\
                      %s"
-                    flatten_name (show_yaml_in_flatten_error yaml) () )
+                    flatten_name (show_yaml_in_error yaml) () )
               | left, right ->
                 (* Normal object key *)
                 let left, right = process_anchor left (loop right) in
@@ -294,6 +309,7 @@ module Make (IO : S.IO) = struct
               | `Scalar s -> make_scalar s
               | `YAML x -> x )
             | None, "!ENV" -> get_env_var value |> make_scalar |> IO.return
+            | None, "!ENV_OPT" -> get_env_var ~default:"" value |> make_scalar |> IO.return
             | None, "!FILE" -> get_file ~tag value >|= make_scalar
             | None, "!ENV_FILE" -> get_env_var value |> get_file ~tag >|= make_scalar
             | None, "!ENV_STR" -> get_env_var value |> make_key |> make_scalar |> IO.return
@@ -319,10 +335,15 @@ module Make (IO : S.IO) = struct
           if state.options.allow_unused_anchors
           then Ok res
           else
-            StringTable.to_seq state.refs |> Seq.find (fun (_, (_, ref_count)) -> ref_count = 0)
+            StringTable.to_seq state.refs
+            |> Seq.filter (fun (_, (_, ref_count)) -> ref_count = 0)
+            |> List.of_seq
             |> function
-            | None -> Ok res
-            | Some (name, _) -> Error ("YAML anchor &" ^ name ^ " is never used"))
+            | [] -> Ok res
+            | ll ->
+              List.map (fun (name, _) -> "YAML anchor &" ^ name ^ " is never used.") ll
+              |> String.concat "\n"
+              |> Result.error)
         (function
           | Failure msg -> IO.return (Error msg)
           | exn -> IO.return (Error (Printexc.to_string exn)))
@@ -376,9 +397,10 @@ module type Intf = sig
     ?config_path_filter_map:(string -> string option io) ->
     ?file_path_filter_map:(string -> string option io) ->
     ?enable_includes:bool ->
+    ?enable_conditional_includes:bool ->
     ?enable_imports:bool ->
     ?allow_unused_anchors:bool ->
-    ?enable_redefinable_anchors:bool ->
+    ?allow_redefining_anchors:bool ->
     ?process_scalar_tag:(tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] io option) ->
     unit ->
     options

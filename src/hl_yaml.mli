@@ -13,9 +13,10 @@ module type Intf = sig
     ?config_path_filter_map:(string -> string option io) ->
     ?file_path_filter_map:(string -> string option io) ->
     ?enable_includes:bool ->
+    ?enable_conditional_includes:bool ->
     ?enable_imports:bool ->
     ?allow_unused_anchors:bool ->
-    ?enable_redefinable_anchors:bool ->
+    ?allow_redefining_anchors:bool ->
     ?process_scalar_tag:(tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] io option) ->
     unit ->
     options

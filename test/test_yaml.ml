@@ -63,7 +63,7 @@ let config2 = {|
 y: *ref
 &ref: def
 z: *ref
-x: y # y == true
+x-x: y # y == true
 |}
 
 let%expect_test "Config YAML processing" =
@@ -124,8 +124,53 @@ let%expect_test "Config YAML processing" =
       e: e
       f: f |}];
 
-  let* () = test "&x: 5\nfoo: bar" in
-  [%expect {| (Error "YAML anchor &x is never used") |}];
+  let* () = test "&x: 5\n&y: 6\nfoo: bar" in
+  [%expect {|
+    (Error  "YAML anchor &y is never used.\
+           \nYAML anchor &x is never used.") |}];
+
+  let* () =
+    test
+      {|
+&supervisors supervisors:
+  - name: Daniel
+    role: project manager
+  - name: Elizabeth
+    role: product owner
+
+employees:
+  - name: Alice
+    &programmer <<:
+      role: programmer
+      language: OCaml
+  - name: Bob
+    <<: *programmer
+  - name: Charlie
+    <<: *programmer
+    language: JavaScript
+  - <<: *supervisors
+|}
+  in
+  [%expect {|
+    supervisors:
+    - name: Daniel
+      role: project manager
+    - name: Elizabeth
+      role: product owner
+    employees:
+    - name: Alice
+      role: programmer
+      language: OCaml
+    - name: Bob
+      role: programmer
+      language: OCaml
+    - name: Charlie
+      role: programmer
+      language: JavaScript
+    - name: Daniel
+      role: project manager
+    - name: Elizabeth
+      role: product owner |}];
 
   let* () = test ~options:(Y.make_options ~allow_unused_anchors:true ()) "&x: 5\nfoo: bar" in
   [%expect {| foo: bar |}];
@@ -133,11 +178,19 @@ let%expect_test "Config YAML processing" =
   let* () = test ~options:(Y.make_options ()) config2 in
   [%expect {| (Error "Duplicate YAML anchor name &ref") |}];
 
-  let* () = test ~options:(Y.make_options ~enable_redefinable_anchors:true ()) config2 in
+  let* () = test ~options:(Y.make_options ~allow_redefining_anchors:true ()) config2 in
   [%expect {|
     "y": abc
     z: def
-    x: true |}];
+    x-x: true |}];
+
+  let* () =
+    let get_env_var _ = None in
+    test ~options:(Y.make_options ~get_env_var ()) "foo: !ENV_OPT foo\nbar: null"
+  in
+  [%expect {|
+    foo:
+    bar: |}];
 
   let* () =
     test config1
