@@ -218,7 +218,7 @@ module Make (IO : S.IO) = struct
                 let* right = process_anchor left (loop right) |> snd in
                 match check_flatten left, right with
                 | (true, _), `A { s_members; _ } -> IO.map_s loop s_members
-                | (false, _), _ -> IO.return_nil
+                | (false, _), _ -> IO.return []
                 | (true, _), yaml -> IO.return [ yaml ] )
               | yaml ->
                 (* Normal array element *)
@@ -314,17 +314,18 @@ module Make (IO : S.IO) = struct
           | Error (`Msg msg) -> failwithf "Invalid YAML in !CONFIG %s: %s" filename msg () )
       in
       IO.catch
-        (fun () -> loop yaml >|= Result.ok)
+        (fun () ->
+          let+ res = loop yaml in
+          if state.options.allow_unused_anchors
+          then Ok res
+          else
+            StringTable.to_seq state.refs |> Seq.find (fun (_, (_, ref_count)) -> ref_count = 0)
+            |> function
+            | None -> Ok res
+            | Some (name, _) -> Error ("YAML anchor &" ^ name ^ " is never used"))
         (function
           | Failure msg -> IO.return (Error msg)
           | exn -> IO.return (Error (Printexc.to_string exn)))
-      >|= function
-      | Ok _ as res when not state.options.allow_unused_anchors -> (
-        StringTable.to_seq state.refs |> Seq.find (fun (_, (_, ref_count)) -> ref_count = 0) |> function
-        | None -> res
-        | Some (name, _) -> Error ("YAML anchor &" ^ name ^ " is never used") )
-      | Ok _ as res -> res
-      | Error _ as res -> res
 
     let of_string ~to_path ?(options = default_options) str =
       match yaml_of_string str with
@@ -423,10 +424,6 @@ module Non_Monadic = struct
   let catch f catch =
     try f () with
     | exn -> catch exn
-
-  let return_true = true
-
-  let return_nil = []
 
   let map_s f ll = List.map f ll
 end

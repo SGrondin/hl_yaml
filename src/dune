@@ -1,6 +1,6 @@
 (library
   (name hl_yaml)
-  (public_name hl-yaml)
+  (public_name hl_yaml)
   (libraries
     unix
     yaml

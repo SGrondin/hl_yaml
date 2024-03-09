@@ -10,10 +10,6 @@ module type S_Lwt = sig
   val apply : ('a -> 'b t) -> 'a -> 'b t
 
   val catch : (unit -> 'a t) -> (exn -> 'a t) -> 'a t
-
-  val return_true : bool t
-
-  val return_nil : _ list t
 end
 
 module type S_Lwt_io = sig
@@ -81,10 +77,6 @@ module type IO = sig
   val bind : 'a t -> ('a -> 'b t) -> 'b t
 
   val catch : (unit -> 'a t) -> (exn -> 'a t) -> 'a t
-
-  val return_true : bool t
-
-  val return_nil : _ list t
 
   val map_s : ('a -> 'b t) -> 'a list -> 'b list t
 

@@ -2,7 +2,7 @@
   (name test)
   (inline_tests)
   (libraries
-    hl-yaml
+    hl_yaml
     core
     eio_main
     lwt
