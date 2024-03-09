@@ -1,3 +1,4 @@
+open! Core
 open Lwt.Syntax
 
 open Hl_yaml.Make_Lwt (Lwt) (Lwt_io)
@@ -23,32 +24,37 @@ let%expect_test "Config YAML processing" =
       match parsed with
       | Ok x ->
         x |> YAML.to_string ~layout_style:`Block ~scalar_style:`Plain |> ok_or_failwith |> Lwt_io.printl
-      | Error s -> Lwt_io.printlf "!ERROR! %s" s
+      | Error _ as err -> Lwt_io.printlf !"%{sexp: (_, string) Result.t}" err
     in
     Lwt_io.flush_all ()
   in
 
   let* () = test ~options:(make_options ~enable_imports:false ()) "!CONFIG simple.yml" in
-  [%expect {| !ERROR! YAML !CONFIG imports are disabled |}];
+  [%expect {| (Error "YAML !CONFIG imports are disabled") |}];
 
   let* () = test "!CONFIG ../../../test/files/simple.yml" in
   [%expect {| abc: def |}];
 
   let* () =
-    test ~options:(make_options ~config_path_relative_to:"../../../test" ()) "!CONFIG files/simple.yml"
+    test
+      ~options:
+        (make_options
+           ~config_path_filter_map:(fun s -> Lwt.return_some (Filename.concat "../../../test" s))
+           () )
+      "!CONFIG files/simple.yml"
   in
   [%expect {| abc: def |}];
 
   let* () =
     test
-      ~options:(make_options ~file_path_relative_to:"../../../test/files" ())
+      ~options:(make_options ~file_path_filter_map:Utils.map_path_lwt ())
       "data: 1\ndata: !FILE data.json"
   in
   [%expect {| data: "{\n  \"hello\": {\n    \"world\": [ 1, 2, null, \"foobar\" ]\n  }\n}" |}];
 
   let* () =
     test
-      ~options:(make_options ~config_path_relative_to:"../../../test/files" ())
+      ~options:(make_options ~config_path_filter_map:Utils.map_path_lwt ())
       "data: 1\ndata: !CONFIG data.json"
   in
   [%expect {|
@@ -65,7 +71,7 @@ let%expect_test "Config YAML processing" =
       Lwt_io.with_file ~flags:[ O_RDONLY; O_NONBLOCK ] ~mode:Input "../../../test/files/advanced.yml"
         Lwt_io.read
     in
-    test ~options:(make_options ~config_path_relative_to:"../../../test/files" ()) raw
+    test ~options:(make_options ~config_path_filter_map:Utils.map_path_lwt ()) raw
   in
   [%expect
     {|
@@ -79,26 +85,18 @@ let%expect_test "Config YAML processing" =
     - name: Eric |}];
 
   let* () =
-    let validate_config_path path =
-      let* () = Lwt_io.printlf "Validated: %S" path in
-      Lwt.return_true
+    let validate_config_path = function
+      | "imported.yml" -> Lwt.return_none
+      | path ->
+        let* () = Lwt_io.printlf "Validated: %S" path in
+        Utils.map_path_lwt path
     in
-    test
-      ~options:(make_options ~config_path_relative_to:"../../../test/files" ~validate_config_path ())
-      "!CONFIG advanced.yml"
+    test ~options:(make_options ~config_path_filter_map:validate_config_path ()) "!CONFIG advanced.yml"
   in
   [%expect
     {|
     Validated: "advanced.yml"
     Validated: "simple.yml"
-    Validated: "imported.yml"
-    hello: world
-    abc: def
-    some array:
-    - name: Alice
-    - name: Bob
-    - name: Charlie
-    - name: Diane
-    - name: Eric |}];
+    (Error "YAML !CONFIG was denied for: imported.yml") |}];
 
   Lwt.return_unit

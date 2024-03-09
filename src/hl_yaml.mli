@@ -10,13 +10,12 @@ module type Intf = sig
   val make_options :
     ?get_env_var:(string -> string option) ->
     ?get_file:(path -> string io) ->
-    ?config_path_relative_to:string ->
-    ?file_path_relative_to:string ->
+    ?config_path_filter_map:(string -> string option io) ->
+    ?file_path_filter_map:(string -> string option io) ->
     ?enable_includes:bool ->
     ?enable_imports:bool ->
     ?allow_unused_anchors:bool ->
     ?enable_redefinable_anchors:bool ->
-    ?validate_config_path:(string -> bool io) ->
     ?process_scalar_tag:(tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] io option) ->
     unit ->
     options

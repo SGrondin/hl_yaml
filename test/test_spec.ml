@@ -1,10 +1,11 @@
+open! Core
 open Hl_yaml.Unix.Spec
 
 let%expect_test "Validations" =
   let test json spec =
     validate spec json |> function
     | [] -> print_endline "Passed"
-    | ll -> List.map render_error ll |> String.concat "\n" |> print_endline
+    | ll -> List.map ll ~f:render_error |> String.concat_lines |> print_endline
   in
 
   test (`List []) (JArray JAny);

@@ -38,12 +38,12 @@ module StringSet = Set.Make (struct
   let compare = String.compare
 end)
 
-let ( >>= ) = Result.bind
+let ( >>=? ) = Result.bind
 
 let rec safe_yaml_to_string ?(len = 256 * 1024) ?layout_style ?scalar_style yaml =
   (* [Yaml.to_string]: The current implementation uses a non-resizable internal string buffer of 256KB, which can be increased via len *)
   (* This function retries up to a size of 2Mb *)
-  ( Yaml.to_json yaml >>= fun json ->
+  ( Yaml.to_json yaml >>=? fun json ->
     try Yaml.to_string json ~len ?layout_style ?scalar_style with
     | Failure msg -> Error (`Msg msg)
     | exn -> Error (`Msg (Printexc.to_string exn)) )
@@ -64,37 +64,34 @@ module Make (IO : S.IO) = struct
 
   let ( let+ ) f x = IO.map x f
 
-  let ( >|= ) f x = IO.map x f
+  let ( >>= ) = IO.bind
+
+  let ( >|= ) x f = IO.map f x
 
   type options = {
     get_env_var: string -> string option;
     get_file: IO.path -> string IO.t;
-    config_path_relative_to: string -> string;
-    file_path_relative_to: string -> string;
+    config_path_filter_map: string -> string option IO.t;
+    file_path_filter_map: string -> string option IO.t;
     allow_unused_anchors: bool;
     enable_redefinable_anchors: bool;
     enable_includes: bool;
     enable_imports: bool;
     process_scalar_tag: tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] IO.t option;
-    validate_config_path: string -> bool IO.t;
   }
 
-  let make_options ?get_env_var ?get_file ?config_path_relative_to ?file_path_relative_to ?enable_includes
-    ?enable_imports ?allow_unused_anchors ?enable_redefinable_anchors ?validate_config_path
-    ?process_scalar_tag () =
+  let make_options ?get_env_var ?get_file ?config_path_filter_map ?file_path_filter_map ?enable_includes
+    ?enable_imports ?allow_unused_anchors ?enable_redefinable_anchors ?process_scalar_tag () =
     {
       get_env_var = Option.value get_env_var ~default:Sys.getenv_opt;
       get_file = Option.value get_file ~default:IO.read_file;
-      config_path_relative_to =
-        Option.map Filename.concat config_path_relative_to |> Option.value ~default:Fun.id;
-      file_path_relative_to =
-        Option.map Filename.concat file_path_relative_to |> Option.value ~default:Fun.id;
+      config_path_filter_map = Option.value config_path_filter_map ~default:(fun s -> IO.return (Some s));
+      file_path_filter_map = Option.value file_path_filter_map ~default:(fun s -> IO.return (Some s));
       enable_includes = Option.value enable_includes ~default:true;
       enable_imports = Option.value enable_imports ~default:true;
       allow_unused_anchors = Option.value allow_unused_anchors ~default:false;
       enable_redefinable_anchors = Option.value enable_redefinable_anchors ~default:false;
       process_scalar_tag = Option.value process_scalar_tag ~default:(fun ~tag:_ _ -> None);
-      validate_config_path = Option.value validate_config_path ~default:(fun _ -> IO.return_true);
     }
 
   let default_options = make_options ()
@@ -118,7 +115,7 @@ module Make (IO : S.IO) = struct
          |`Variant _ ->
           (loop [@tailcall]) (Yojson.Safe.to_basic json :> Yojson.Safe.t)
       in
-      json |> loop |> wrap Yaml.of_json >>= wrap safe_yaml_to_string
+      json |> loop |> wrap Yaml.of_json >>=? wrap safe_yaml_to_string
   end
 
   module YAML = struct
@@ -176,9 +173,11 @@ module Make (IO : S.IO) = struct
           | Some x -> x
           | None -> failwith ("Environment variable requested by YAML config not found: " ^ name) )
       in
-      let get_file filename =
+      let get_file ~tag filename =
         StringTable.find_or_add state.files filename ~default:(fun () ->
-          filename |> state.options.file_path_relative_to |> to_path |> state.options.get_file )
+          state.options.file_path_filter_map filename >>= function
+          | Some s -> to_path s |> state.options.get_file
+          | None -> failwithf "YAML %s was denied for: %s" tag filename () )
       in
       let make_key key =
         let buf = Buffer.create (String.length key + 10) in
@@ -295,14 +294,10 @@ module Make (IO : S.IO) = struct
               | `Scalar s -> make_scalar s
               | `YAML x -> x )
             | None, "!ENV" -> get_env_var value |> make_scalar |> IO.return
-            | None, "!FILE" -> get_file value >|= make_scalar
-            | None, "!ENV_FILE" -> get_env_var value |> get_file >|= make_scalar
+            | None, "!FILE" -> get_file ~tag value >|= make_scalar
+            | None, "!ENV_FILE" -> get_env_var value |> get_file ~tag >|= make_scalar
             | None, "!ENV_STR" -> get_env_var value |> make_key |> make_scalar |> IO.return
-            | None, "!CONFIG" when state.options.enable_imports ->
-              let* is_allowed = state.options.validate_config_path value in
-              if is_allowed
-              then get_config value
-              else failwithf "YAML !CONFIG was denied for: %s" value ()
+            | None, "!CONFIG" when state.options.enable_imports -> get_config value
             | None, "!CONFIG" -> failwith "YAML !CONFIG imports are disabled"
             | None, _ -> failwithf "Undefined YAML tag: %s" tag () ))
           |> process_anchor original
@@ -310,7 +305,9 @@ module Make (IO : S.IO) = struct
       and get_config filename =
         StringTable.find_or_add state.configs filename ~default:(fun () ->
           let* contents =
-            filename |> state.options.config_path_relative_to |> to_path |> state.options.get_file
+            state.options.config_path_filter_map filename >>= function
+            | Some s -> to_path s |> state.options.get_file
+            | None -> failwithf "YAML !CONFIG was denied for: %s" filename ()
           in
           match yaml_of_string contents with
           | Ok partial_config -> loop partial_config
@@ -348,11 +345,11 @@ module Make (IO : S.IO) = struct
   let parse ~to_path ?options ?validate:(spec = Spec.JAny) ~of_yojson:parser contents =
     let+ json =
       let+ res = YAML.of_string ~to_path ?options contents in
-      match res >>= wrap Yaml.to_json with
+      match res >>=? wrap Yaml.to_json with
       | Ok x -> Ok (YAML.to_yojson x)
       | Error message -> Error [ Spec.Deserialization { message; attempted = Right contents } ]
     in
-    json >>= fun json ->
+    json >>=? fun json ->
     match Spec.validate spec json with
     | [] -> (
       match parser json with
@@ -375,13 +372,12 @@ module type Intf = sig
   val make_options :
     ?get_env_var:(string -> string option) ->
     ?get_file:(path -> string io) ->
-    ?config_path_relative_to:string ->
-    ?file_path_relative_to:string ->
+    ?config_path_filter_map:(string -> string option io) ->
+    ?file_path_filter_map:(string -> string option io) ->
     ?enable_includes:bool ->
     ?enable_imports:bool ->
     ?allow_unused_anchors:bool ->
     ?enable_redefinable_anchors:bool ->
-    ?validate_config_path:(string -> bool io) ->
     ?process_scalar_tag:(tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] io option) ->
     unit ->
     options

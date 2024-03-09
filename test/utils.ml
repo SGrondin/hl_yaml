@@ -16,6 +16,10 @@ let ok_or_failwith = function
 | Ok x -> x
 | Error s -> failwith s
 
+let map_path s = Some (Filename.concat "../../../test/files" s)
+
+let map_path_lwt s = Lwt.return (map_path s)
+
 type enum =
   | ABC
   | DEF
