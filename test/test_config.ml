@@ -31,24 +31,24 @@ let%expect_test "Config YAML processing" =
   let* () = test ~options:(make_options ~enable_imports:false ()) "!CONFIG simple.yml" in
   [%expect {| !ERROR! YAML !CONFIG imports are disabled |}];
 
-  let* () = test "!CONFIG ../../../test/simple.yml" in
+  let* () = test "!CONFIG ../../../test/files/simple.yml" in
   [%expect {| abc: def |}];
 
   let* () =
-    test ~options:(make_options ~config_path_relative_to:"../../../test" ()) "!CONFIG simple.yml"
+    test ~options:(make_options ~config_path_relative_to:"../../../test" ()) "!CONFIG files/simple.yml"
   in
   [%expect {| abc: def |}];
 
   let* () =
     test
-      ~options:(make_options ~file_path_relative_to:"../../../test" ())
+      ~options:(make_options ~file_path_relative_to:"../../../test/files" ())
       "data: 1\ndata: !FILE data.json"
   in
   [%expect {| data: "{\n  \"hello\": {\n    \"world\": [ 1, 2, null, \"foobar\" ]\n  }\n}" |}];
 
   let* () =
     test
-      ~options:(make_options ~config_path_relative_to:"../../../test" ())
+      ~options:(make_options ~config_path_relative_to:"../../../test/files" ())
       "data: 1\ndata: !CONFIG data.json"
   in
   [%expect {|
@@ -62,10 +62,10 @@ let%expect_test "Config YAML processing" =
 
   let* () =
     let* raw =
-      Lwt_io.with_file ~flags:[ O_RDONLY; O_NONBLOCK ] ~mode:Input "../../../test/advanced.yml"
+      Lwt_io.with_file ~flags:[ O_RDONLY; O_NONBLOCK ] ~mode:Input "../../../test/files/advanced.yml"
         Lwt_io.read
     in
-    test ~options:(make_options ~config_path_relative_to:"../../../test" ()) raw
+    test ~options:(make_options ~config_path_relative_to:"../../../test/files" ()) raw
   in
   [%expect
     {|
@@ -84,7 +84,7 @@ let%expect_test "Config YAML processing" =
       Lwt.return_true
     in
     test
-      ~options:(make_options ~config_path_relative_to:"../../../test" ~validate_config_path ())
+      ~options:(make_options ~config_path_relative_to:"../../../test/files" ~validate_config_path ())
       "!CONFIG advanced.yml"
   in
   [%expect

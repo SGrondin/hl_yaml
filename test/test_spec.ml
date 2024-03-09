@@ -53,6 +53,11 @@ let%expect_test "Validations" =
     Extraneous key: $.extra
     Missing key: $.abc (String) |}];
 
+  test
+    (`List [ `Int 5; `String "abc" ])
+    (make_schema ~name:"foo" ~reject_extras:true [ { key = "abc"; required = true; spec = JAtom } ]);
+  [%expect {| $ expected a foo Object, but found: Array of Integers |}];
+
   test (`Assoc []) (JObject (JArray JString));
   [%expect {| Passed |}];
 

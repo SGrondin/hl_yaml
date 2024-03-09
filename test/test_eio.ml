@@ -18,7 +18,7 @@ let%expect_test "Config YAML processing - Eio" =
     Stdlib.flush_all ()
   in
 
-  test ~options:(Y.make_options ~config_path_relative_to:"../../../test" ()) "!CONFIG advanced.yml";
+  test ~options:(Y.make_options ~config_path_relative_to:"../../../test/files" ()) "!CONFIG advanced.yml";
   [%expect
     {|
     hello: world
@@ -31,11 +31,12 @@ let%expect_test "Config YAML processing - Eio" =
     - name: Eric |}];
 
   Y.parse ~cwd
-    ~options:(Y.make_options ~config_path_relative_to:"../../../test" ())
+    ~options:(Y.make_options ~config_path_relative_to:"../../../test/files" ())
     ~of_yojson:Utils.foo_of_yojson "!CONFIG advanced.yml"
   |> Utils.render
   |> print_endline;
-  [%expect {|
+  [%expect
+    {|
     ((hello world) (abc DEF)
      (names
       (((name Alice)) ((name Bob)) ((name Charlie)) ((name Diane)) ((name Eric))))) |}]

@@ -1,3 +1,4 @@
+open! Core
 open Lwt.Syntax
 open Utils.Lwt_expect_tests
 module Y = Hl_yaml.Make_Lwt (Lwt) (Lwt_io)
@@ -57,6 +58,14 @@ all_connections:
   - <<: *user_connections
 |}
 
+let config2 = {|
+&ref: abc
+y: *ref
+&ref: def
+z: *ref
+x: y # y == true
+|}
+
 let%expect_test "Config YAML processing" =
   let test ?options raw =
     let* parsed = Y.YAML.of_string ?options raw in
@@ -67,7 +76,7 @@ let%expect_test "Config YAML processing" =
         |> Y.YAML.to_string ~layout_style:`Block ~scalar_style:`Plain
         |> Utils.ok_or_failwith
         |> Lwt_io.printl
-      | Error s -> Lwt_io.printlf "!ERROR! %s" s
+      | Error _ as err -> Lwt_io.printlf !"%{sexp: (_, string) Result.t}" err
     in
 
     Lwt_io.flush_all ()
@@ -94,11 +103,10 @@ let%expect_test "Config YAML processing" =
       | "!PLUS_FIVE" -> Some (Lwt.return (`Scalar (int_of_string str + 5 |> Int.to_string)))
       | "!SPREAD_IT" ->
         let m_members =
-          String.to_seq str
-          |> Seq.map (fun c ->
+          String.to_list str
+          |> List.map ~f:(fun c ->
                let x = make_scalar c in
                x, x )
-          |> List.of_seq
         in
         Some
           (Lwt.return (`YAML (`O Yaml.{ m_anchor = None; m_tag = None; m_implicit = true; m_members })))
@@ -117,10 +125,19 @@ let%expect_test "Config YAML processing" =
       f: f |}];
 
   let* () = test "&x: 5\nfoo: bar" in
-  [%expect {| !ERROR! YAML anchor &x is never used |}];
+  [%expect {| (Error "YAML anchor &x is never used") |}];
 
   let* () = test ~options:(Y.make_options ~allow_unused_anchors:true ()) "&x: 5\nfoo: bar" in
   [%expect {| foo: bar |}];
+
+  let* () = test ~options:(Y.make_options ()) config2 in
+  [%expect {| (Error "Duplicate YAML anchor name &ref") |}];
+
+  let* () = test ~options:(Y.make_options ~enable_redefinable_anchors:true ()) config2 in
+  [%expect {|
+    "y": abc
+    z: def
+    x: true |}];
 
   let* () =
     test config1

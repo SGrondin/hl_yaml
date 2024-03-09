@@ -18,7 +18,9 @@ let%expect_test "Config YAML processing - Lwt" =
   in
 
   let* () =
-    test ~options:(Y.make_options ~config_path_relative_to:"../../../test" ()) "!CONFIG advanced.yml"
+    test
+      ~options:(Y.make_options ~config_path_relative_to:"../../../test/files" ())
+      "!CONFIG advanced.yml"
   in
   [%expect
     {|
@@ -34,13 +36,14 @@ let%expect_test "Config YAML processing - Lwt" =
   let* () =
     let* x =
       Y.parse
-        ~options:(Y.make_options ~config_path_relative_to:"../../../test" ())
+        ~options:(Y.make_options ~config_path_relative_to:"../../../test/files" ())
         ~of_yojson:Utils.foo_of_yojson "!CONFIG advanced.yml"
     in
     let* () = Utils.render x |> Lwt_io.printl in
     Lwt_io.flush_all ()
   in
-  [%expect {|
+  [%expect
+    {|
     ((hello world) (abc DEF)
      (names
       (((name Alice)) ((name Bob)) ((name Charlie)) ((name Diane)) ((name Eric))))) |}];

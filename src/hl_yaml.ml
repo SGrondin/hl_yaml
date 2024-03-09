@@ -72,6 +72,7 @@ module Make (IO : S.IO) = struct
     config_path_relative_to: string -> string;
     file_path_relative_to: string -> string;
     allow_unused_anchors: bool;
+    enable_redefinable_anchors: bool;
     enable_includes: bool;
     enable_imports: bool;
     process_scalar_tag: tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] IO.t option;
@@ -79,7 +80,8 @@ module Make (IO : S.IO) = struct
   }
 
   let make_options ?get_env_var ?get_file ?config_path_relative_to ?file_path_relative_to ?enable_includes
-    ?enable_imports ?allow_unused_anchors ?validate_config_path ?process_scalar_tag () =
+    ?enable_imports ?allow_unused_anchors ?enable_redefinable_anchors ?validate_config_path
+    ?process_scalar_tag () =
     {
       get_env_var = Option.value get_env_var ~default:Sys.getenv_opt;
       get_file = Option.value get_file ~default:IO.read_file;
@@ -90,6 +92,7 @@ module Make (IO : S.IO) = struct
       enable_includes = Option.value enable_includes ~default:true;
       enable_imports = Option.value enable_imports ~default:true;
       allow_unused_anchors = Option.value allow_unused_anchors ~default:false;
+      enable_redefinable_anchors = Option.value enable_redefinable_anchors ~default:false;
       process_scalar_tag = Option.value process_scalar_tag ~default:(fun ~tag:_ _ -> None);
       validate_config_path = Option.value validate_config_path ~default:(fun _ -> IO.return_true);
     }
@@ -156,8 +159,12 @@ module Make (IO : S.IO) = struct
           | `Scalar { anchor = Some key; _ }
            |`A { s_anchor = Some key; _ }
            |`O { m_anchor = Some key; _ } -> (
-            match StringTable.add state.refs ~key ~data:(right, 0) with
+            let data = right, 0 in
+            match StringTable.add state.refs ~key ~data with
             | `Ok -> remove_anchor left
+            | `Duplicate when state.options.enable_redefinable_anchors ->
+              StringTable.replace state.refs key data;
+              remove_anchor left
             | `Duplicate -> failwithf "Duplicate YAML anchor name &%s" key () )
           | _ -> left
         in
@@ -373,6 +380,7 @@ module type Intf = sig
     ?enable_includes:bool ->
     ?enable_imports:bool ->
     ?allow_unused_anchors:bool ->
+    ?enable_redefinable_anchors:bool ->
     ?validate_config_path:(string -> bool io) ->
     ?process_scalar_tag:(tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] io option) ->
     unit ->
