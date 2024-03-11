@@ -504,11 +504,11 @@ module type Intf_Eio = sig
 end
 
 module Make_Eio (Eio : S.S_Eio) :
-  Intf_Eio with type 'a io := 'a and type filepath := Eio.Fs.dir_ty Eio.Path.t = struct
+  Intf_Eio with type 'a io := 'a and type filepath := [ `Dir ] Eio.Path.t = struct
   module M = Make (struct
     include Non_Monadic
 
-    type filepath = Eio.Fs.dir_ty Eio.Path.t
+    type filepath = [ `Dir ] Eio.Path.t
 
     let read_file filepath = Eio.Path.load filepath
   end)

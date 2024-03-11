@@ -40,24 +40,8 @@ module type S_Lwt_io = sig
 end
 
 module type S_Eio = sig
-  module Resource : sig
-    type ('t, -'tags) handler
-
-    type -'tags t = T : ('t * ('t, 'tags) handler) -> 'tags t
-  end
-
-  module Std : sig
-    type 'a r = 'a Resource.t
-  end
-
-  module Fs : sig
-    type dir_ty = [ `Dir ]
-
-    type 'a dir = ([> dir_ty ] as 'a) Std.r
-  end
-
   module Path : sig
-    type 'a t = 'a Fs.dir * string
+    type 'a t constraint 'a = [> `Dir ]
 
     val load : 'a t -> string
 

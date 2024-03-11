@@ -93,4 +93,4 @@ module type Intf_Eio = sig
 end
 
 module Make_Eio : functor (Eio : S.S_Eio) ->
-  Intf_Eio with type 'a io := 'a and type filepath := Eio.Fs.dir_ty Eio.Path.t
+  Intf_Eio with type 'a io := 'a and type filepath := [ `Dir ] Eio.Path.t
