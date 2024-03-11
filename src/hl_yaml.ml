@@ -1,15 +1,6 @@
 module StringTable = struct
-  module StringTable = Hashtbl.Make (struct
-    type t = string
-
-    let equal = String.equal
-
-    let hash = String.hash
-  end)
-
+  module StringTable = Hashtbl.Make (String)
   include StringTable
-
-  let create () = StringTable.create 16
 
   let add tbl ~key ~data =
     if StringTable.mem tbl key
@@ -25,30 +16,21 @@ module StringTable = struct
       let x = default () in
       StringTable.add tbl key x;
       x
-
-  let update_and_return tbl key ~f =
-    let x = f (StringTable.find_opt tbl key) in
-    StringTable.replace tbl key x;
-    x
 end
 
-module StringSet = Set.Make (struct
-  type t = string
+module StringSet = Set.Make (String)
 
-  let compare = String.compare
-end)
-
-let ( >>=? ) = Result.bind
+let ( >>= ) = Result.bind
 
 let rec safe_yaml_to_string ?(len = 256 * 1024) ?layout_style ?scalar_style yaml =
   (* [Yaml.to_string]: The current implementation uses a non-resizable internal string buffer of 256KB, which can be increased via len *)
   (* This function retries up to a size of 2Mb *)
-  ( Yaml.to_json yaml >>=? fun json ->
+  ( Yaml.to_json yaml >>= fun json ->
     try Yaml.to_string json ~len ?layout_style ?scalar_style with
     | Failure msg -> Error (`Msg msg)
     | exn -> Error (`Msg (Printexc.to_string exn)) )
   |> function
-  | Error _ when len < 2 * 1024 * 1024 ->
+  | Error _ when len < 4 * 1024 * 1024 ->
     safe_yaml_to_string ~len:(len * 2) ?layout_style ?scalar_style yaml
   | x -> x
 
@@ -57,22 +39,33 @@ let show_yaml_in_error yaml =
   | Ok s -> s
   | Error (`Msg msg) -> failwith ("Invalid YAML to flatten: " ^ msg)
 
-let wrap f x = f x |> Result.map_error (fun (`Msg s) -> s)
+let wrap ?attempted f x =
+  f x
+  |> Result.map_error (fun (`Msg message) ->
+       match attempted with
+       | None -> [ Spec.Processing { message } ]
+       | Some attempted -> [ Spec.Deserialization { message; attempted } ] )
 
 module Make (IO : S.IO) = struct
+  type filepath = IO.filepath
+
   let ( let* ) = IO.bind
 
-  let ( let+ ) f x = IO.map x f
-
-  let ( >>= ) = IO.bind
+  let ( let+ ) x f = IO.map f x
 
   let ( >|= ) x f = IO.map f x
 
+  exception HL_YAML_error of string
+
+  let failwith s = raise (HL_YAML_error s)
+
+  let failwithf fmt = Format.ksprintf (fun s () -> failwith s) fmt
+
   type options = {
     get_env_var: string -> string option;
-    get_file: IO.path -> string IO.t;
-    config_path_filter_map: string -> string option IO.t;
-    file_path_filter_map: string -> string option IO.t;
+    get_file: IO.filepath -> string IO.t;
+    config_path_filter_map: string -> string IO.t;
+    file_path_filter_map: string -> string IO.t;
     allow_unused_anchors: bool;
     allow_redefining_anchors: bool;
     enable_includes: bool;
@@ -87,8 +80,8 @@ module Make (IO : S.IO) = struct
     {
       get_env_var = Option.value get_env_var ~default:Sys.getenv_opt;
       get_file = Option.value get_file ~default:IO.read_file;
-      config_path_filter_map = Option.value config_path_filter_map ~default:(fun s -> IO.return (Some s));
-      file_path_filter_map = Option.value file_path_filter_map ~default:(fun s -> IO.return (Some s));
+      config_path_filter_map = Option.value config_path_filter_map ~default:(fun s -> IO.return s);
+      file_path_filter_map = Option.value file_path_filter_map ~default:(fun s -> IO.return s);
       enable_includes = Option.value enable_includes ~default:true;
       enable_conditional_includes = Option.value enable_conditional_includes ~default:true;
       enable_imports = Option.value enable_imports ~default:true;
@@ -118,7 +111,8 @@ module Make (IO : S.IO) = struct
          |`Variant _ ->
           (loop [@tailcall]) (Yojson.Safe.to_basic json :> Yojson.Safe.t)
       in
-      json |> loop |> wrap Yaml.of_json >>=? wrap safe_yaml_to_string
+      let attempted = `JSON json in
+      json |> loop |> wrap ~attempted Yaml.of_json >>= wrap ~attempted safe_yaml_to_string
   end
 
   module YAML = struct
@@ -144,9 +138,7 @@ module Make (IO : S.IO) = struct
       options: options;
     }
 
-    let failwithf fmt = Format.ksprintf (fun s () -> failwith s) fmt
-
-    let resolve_references ~to_path state (yaml : yaml) =
+    let resolve_references ~to_filepath state (yaml : yaml) : (yaml, Spec.error list) result IO.t =
       let process_anchor left right =
         let remove_anchor = function
           | `Scalar ({ anchor = Some _; _ } as scalar) -> `Scalar { scalar with anchor = None }
@@ -178,11 +170,10 @@ module Make (IO : S.IO) = struct
             x
           | None, None -> failwith ("Environment variable requested by YAML config not found: " ^ name) )
       in
-      let get_file ~tag filename =
+      let get_file filename =
         StringTable.find_or_add state.files filename ~default:(fun () ->
-          state.options.file_path_filter_map filename >>= function
-          | Some s -> to_path s |> state.options.get_file
-          | None -> failwithf "YAML %s was denied for: %s" tag filename () )
+          let* path = state.options.file_path_filter_map filename in
+          to_filepath path |> state.options.get_file )
       in
       let make_key key =
         let buf = Buffer.create (String.length key + 10) in
@@ -211,14 +202,13 @@ module Make (IO : S.IO) = struct
           failwithf "YAML processing error in check_flatten. Please report this bug. Unexpected: %s"
             (show_yaml_in_error yaml) ()
       in
-      let check_includes_status = function
+      let is_include_allowed = function
         | `Scalar { value = "<<"; _ } -> state.options.enable_includes
         | `Scalar { tag = Some "!IF_DEF"; _ }
          |`Scalar { tag = Some "!IF_NOT_DEF"; _ } ->
           state.options.enable_conditional_includes
         | yaml ->
-          failwithf
-            "YAML processing error in check_includes_status. Please report this bug. Unexpected: %s"
+          failwithf "YAML processing error in is_include_allowed. Please report this bug. Unexpected: %s"
             (show_yaml_in_error yaml) ()
       in
       let rec loop : yaml -> yaml IO.t = function
@@ -228,7 +218,7 @@ module Make (IO : S.IO) = struct
               | `O { m_members = [ ((`Scalar { tag = Some "!IF_DEF"; _ } as left), right) ]; _ }
                |`O { m_members = [ ((`Scalar { tag = Some "!IF_NOT_DEF"; _ } as left), right) ]; _ }
                |`O { m_members = [ ((`Scalar { value = "<<"; _ } as left), right) ]; _ }
-                when check_includes_status left -> (
+                when is_include_allowed left -> (
                 (* !IF_DEF, !IF_NOT_DEF, or "<<" *)
                 let* right = process_anchor left (loop right) |> snd in
                 match check_flatten left, right with
@@ -248,7 +238,7 @@ module Make (IO : S.IO) = struct
               | (`Scalar { tag = Some "!IF_DEF"; _ } as left), right
                |(`Scalar { tag = Some "!IF_NOT_DEF"; _ } as left), right
                |(`Scalar { value = "<<"; _ } as left), right
-                when state.options.enable_includes -> (
+                when is_include_allowed left -> (
                 (* !IF_DEF, !IF_NOT_DEF, or "<<" *)
                 let+ right = process_anchor left (loop right) |> snd in
                 match check_flatten left, right with
@@ -284,10 +274,13 @@ module Make (IO : S.IO) = struct
           |> process_anchor original
           |> snd
         | `Alias key ->
-          StringTable.update_and_return state.refs key ~f:(function
+          let ((yaml, _) as data) =
+            match StringTable.find_opt state.refs key with
             | Some (found, ref_count) -> found, ref_count + 1
-            | None -> failwithf "YAML *%s references the missing anchor &%s" key key () )
-          |> fst
+            | None -> failwithf "YAML *%s references the missing anchor &%s" key key ()
+          in
+          StringTable.replace state.refs key data;
+          yaml
         | `Scalar scalar as original ->
           (match scalar with
           | { tag = None; _ } as x -> IO.return (`Scalar { x with anchor = None })
@@ -310,8 +303,8 @@ module Make (IO : S.IO) = struct
               | `YAML x -> x )
             | None, "!ENV" -> get_env_var value |> make_scalar |> IO.return
             | None, "!ENV_OPT" -> get_env_var ~default:"" value |> make_scalar |> IO.return
-            | None, "!FILE" -> get_file ~tag value >|= make_scalar
-            | None, "!ENV_FILE" -> get_env_var value |> get_file ~tag >|= make_scalar
+            | None, "!FILE" -> get_file value >|= make_scalar
+            | None, "!ENV_FILE" -> get_env_var value |> get_file >|= make_scalar
             | None, "!ENV_STR" -> get_env_var value |> make_key |> make_scalar |> IO.return
             | None, "!CONFIG" when state.options.enable_imports -> get_config value
             | None, "!CONFIG" -> failwith "YAML !CONFIG imports are disabled"
@@ -321,9 +314,8 @@ module Make (IO : S.IO) = struct
       and get_config filename =
         StringTable.find_or_add state.configs filename ~default:(fun () ->
           let* contents =
-            state.options.config_path_filter_map filename >>= function
-            | Some s -> to_path s |> state.options.get_file
-            | None -> failwithf "YAML !CONFIG was denied for: %s" filename ()
+            let* path = state.options.config_path_filter_map filename in
+            to_filepath path |> state.options.get_file
           in
           match yaml_of_string contents with
           | Ok partial_config -> loop partial_config
@@ -341,42 +333,42 @@ module Make (IO : S.IO) = struct
             |> function
             | [] -> Ok res
             | ll ->
-              List.map (fun (name, _) -> "YAML anchor &" ^ name ^ " is never used.") ll
-              |> String.concat "\n"
+              List.map
+                (fun (name, _) ->
+                  Spec.Processing { message = "YAML anchor &" ^ name ^ " is never used." })
+                ll
               |> Result.error)
         (function
-          | Failure msg -> IO.return (Error msg)
-          | exn -> IO.return (Error (Printexc.to_string exn)))
+          | HL_YAML_error message -> IO.return (Error [ Spec.Processing { message } ])
+          | exn -> raise exn)
 
-    let of_string ~to_path ?(options = default_options) str =
+    let of_string ~to_filepath ?(options = default_options) str =
       match yaml_of_string str with
       | Ok x ->
         let state =
           {
-            refs = StringTable.create ();
-            env_vars = StringTable.create ();
-            files = StringTable.create ();
-            configs = StringTable.create ();
+            refs = StringTable.create 16;
+            env_vars = StringTable.create 16;
+            files = StringTable.create 16;
+            configs = StringTable.create 16;
             options;
           }
         in
-        resolve_references ~to_path state x
-      | Error (`Msg message) -> IO.return (Error message)
+        resolve_references ~to_filepath state x
+      | Error (`Msg message) ->
+        IO.return (Error [ Spec.Deserialization { message; attempted = `String str } ])
   end
 
-  let parse ~to_path ?options ?validate:(spec = Spec.JAny) ~of_yojson:parser contents =
+  let parse ~to_filepath ?options ?validate:(spec = Spec.JAny) ~of_yojson:parser contents =
     let+ json =
-      let+ res = YAML.of_string ~to_path ?options contents in
-      match res >>=? wrap Yaml.to_json with
-      | Ok x -> Ok (YAML.to_yojson x)
-      | Error message -> Error [ Spec.Deserialization { message; attempted = Right contents } ]
+      let+ res = YAML.of_string ~to_filepath ?options contents in
+      res >>= wrap ~attempted:(`String contents) Yaml.to_json |> Result.map YAML.to_yojson
     in
-    json >>=? fun json ->
+    json >>= fun json ->
     match Spec.validate spec json with
-    | [] -> (
-      match parser json with
-      | Ok _ as x -> x
-      | Error message -> Error [ Deserialization { message; attempted = Left json } ] )
+    | [] ->
+      parser json
+      |> Result.map_error (fun message -> [ Spec.Deserialization { message; attempted = `JSON json } ])
     | errors -> Error errors
 end
 
@@ -385,17 +377,28 @@ module Spec = Spec
 module type Intf = sig
   type +'a io
 
-  type options
+  type filepath
 
-  type path
+  type options = {
+    get_env_var: string -> string option;
+    get_file: filepath -> string io;
+    config_path_filter_map: string -> string io;
+    file_path_filter_map: string -> string io;
+    allow_unused_anchors: bool;
+    allow_redefining_anchors: bool;
+    enable_includes: bool;
+    enable_conditional_includes: bool;
+    enable_imports: bool;
+    process_scalar_tag: tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] io option;
+  }
 
   val default_options : options
 
   val make_options :
     ?get_env_var:(string -> string option) ->
-    ?get_file:(path -> string io) ->
-    ?config_path_filter_map:(string -> string option io) ->
-    ?file_path_filter_map:(string -> string option io) ->
+    ?get_file:(filepath -> string io) ->
+    ?config_path_filter_map:(string -> string io) ->
+    ?file_path_filter_map:(string -> string io) ->
     ?enable_includes:bool ->
     ?enable_conditional_includes:bool ->
     ?enable_imports:bool ->
@@ -406,11 +409,11 @@ module type Intf = sig
     options
 
   module JSON : sig
-    val to_yaml_string : Yojson.Safe.t -> (string, string) result
+    val to_yaml_string : Yojson.Safe.t -> (string, Spec.error list) result
   end
 
   module YAML : sig
-    val of_string : ?options:options -> string -> (Yaml.yaml, string) result io
+    val of_string : ?options:options -> string -> (Yaml.yaml, Spec.error list) result io
 
     val to_yojson : Yaml.value -> Yojson.Safe.t
 
@@ -418,13 +421,15 @@ module type Intf = sig
       ?layout_style:Yaml.layout_style ->
       ?scalar_style:Yaml.scalar_style ->
       Yaml.yaml ->
-      (string, string) result
+      (string, Spec.error list) result
   end
 
   module Spec : sig
     (** @inline *)
     include module type of Spec
   end
+
+  exception HL_YAML_error of string
 
   val parse :
     ?options:options ->
@@ -451,16 +456,16 @@ module Non_Monadic = struct
 end
 
 module Make_Lwt (Lwt : S.S_Lwt) (Lwt_io : S.S_Lwt_io with type 'a lwt_t := 'a Lwt.t) :
-  Intf with type 'a io := 'a Lwt.t and type path := string = struct
+  Intf with type 'a io := 'a Lwt.t and type filepath := string = struct
   module M = Make (struct
     include Lwt
 
-    type path = string
+    type filepath = string
 
     let map_s f l =
       let rec inner acc = function
         | [] -> List.rev acc |> Lwt.return
-        | hd :: tl -> Lwt.bind (Lwt.apply f hd) (fun r -> (inner [@ocaml.tailcall]) (r :: acc) tl)
+        | hd :: tl -> Lwt.bind (Lwt.apply f hd) (fun r -> (inner [@tailcall]) (r :: acc) tl)
       in
       inner [] l
 
@@ -473,11 +478,11 @@ module Make_Lwt (Lwt : S.S_Lwt) (Lwt_io : S.S_Lwt_io with type 'a lwt_t := 'a Lw
   module YAML = struct
     include M.YAML
 
-    let of_string ?options str = M.YAML.of_string ~to_path:Fun.id ?options str
+    let of_string ?options str = M.YAML.of_string ~to_filepath:Fun.id ?options str
   end
 
   let parse ?options ?validate ~of_yojson contents =
-    M.parse ~to_path:Fun.id ?options ?validate ~of_yojson contents
+    M.parse ~to_filepath:Fun.id ?options ?validate ~of_yojson contents
 end
 
 module type Intf_Eio = sig
@@ -486,11 +491,11 @@ module type Intf_Eio = sig
   module YAML : sig
     include module type of YAML
 
-    val of_string : cwd:path -> ?options:options -> string -> (Yaml.yaml, string) result io
+    val of_string : cwd:filepath -> ?options:options -> string -> (Yaml.yaml, Spec.error list) result io
   end
 
   val parse :
-    cwd:path ->
+    cwd:filepath ->
     ?options:options ->
     ?validate:Spec.t ->
     of_yojson:(Yojson.Safe.t -> ('a, string) result) ->
@@ -499,13 +504,13 @@ module type Intf_Eio = sig
 end
 
 module Make_Eio (Eio : S.S_Eio) :
-  Intf_Eio with type 'a io := 'a and type path := Eio.Fs.dir_ty Eio.Path.t = struct
+  Intf_Eio with type 'a io := 'a and type filepath := Eio.Fs.dir_ty Eio.Path.t = struct
   module M = Make (struct
     include Non_Monadic
 
-    type path = Eio.Fs.dir_ty Eio.Path.t
+    type filepath = Eio.Fs.dir_ty Eio.Path.t
 
-    let read_file path = Eio.Path.load path
+    let read_file filepath = Eio.Path.load filepath
   end)
 
   include M
@@ -513,34 +518,33 @@ module Make_Eio (Eio : S.S_Eio) :
   module YAML = struct
     include M.YAML
 
-    let of_string ~cwd ?options str = M.YAML.of_string ~to_path:Eio.Path.((fun s -> cwd / s)) ?options str
+    let of_string ~cwd ?options str =
+      M.YAML.of_string ~to_filepath:Eio.Path.((fun s -> cwd / s)) ?options str
   end
 
   let parse ~cwd ?options ?validate ~of_yojson contents =
-    M.parse ~to_path:Eio.Path.((fun s -> cwd / s)) ?options ?validate ~of_yojson contents
+    M.parse ~to_filepath:Eio.Path.((fun s -> cwd / s)) ?options ?validate ~of_yojson contents
 end
 
 module Unix : Intf with type 'a io := 'a = struct
   module M = Make (struct
     include Non_Monadic
 
-    type path = string
+    type filepath = string
 
     let read_file filename =
       let chan = In_channel.open_bin filename in
       Fun.protect (fun () -> In_channel.input_all chan) ~finally:(fun () -> In_channel.close chan)
   end)
 
-  type path = string
-
   include M
 
   module YAML = struct
     include M.YAML
 
-    let of_string ?options str = M.YAML.of_string ~to_path:Fun.id ?options str
+    let of_string ?options str = M.YAML.of_string ~to_filepath:Fun.id ?options str
   end
 
   let parse ?options ?validate ~of_yojson contents =
-    M.parse ~to_path:Fun.id ?options ?validate ~of_yojson contents
+    M.parse ~to_filepath:Fun.id ?options ?validate ~of_yojson contents
 end

@@ -24,7 +24,7 @@ depends: [
   "yojson"
   "yaml" { >= "3.2.0" }
 
-  "core" { with-test }
+  "core" { with-test & >= "v0.16" }
   "ppx_expect" { with-test }
   "ppx_sexp_conv" { with-test }
   "ppx_deriving_yojson" { with-test }

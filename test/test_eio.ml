@@ -8,8 +8,11 @@ let%expect_test "Config YAML processing - Eio" =
     let parsed = Y.YAML.of_string ~cwd ?options raw in
     let () =
       match parsed with
-      | Ok x -> x |> Y.YAML.to_string |> Utils.ok_or_failwith |> Stdlib.print_endline
-      | Error _ as err -> Stdlib.Printf.printf !"%{sexp: (_, string) Result.t}" err
+      | Ok x -> x |> Y.YAML.to_string |> Utils.ok_or_exn |> Stdlib.print_endline
+      | Error ll ->
+        Stdlib.Printf.printf
+          !"Error: %{Yojson.Safe.pretty_to_string}"
+          ([%to_yojson: Y.Spec.error list] ll)
     in
     Stdlib.flush_all ()
   in

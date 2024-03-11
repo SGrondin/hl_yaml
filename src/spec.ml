@@ -1,10 +1,5 @@
 module StringMap = struct
-  module StringMap = Map.Make (struct
-    type t = string
-
-    let compare = String.compare
-  end)
-
+  module StringMap = Map.Make (String)
   include StringMap
 
   let fold2 m1 m2 ~init ~f =
@@ -186,8 +181,9 @@ type error =
     }
   | Deserialization of {
       message: string;
-      attempted: (Yojson.Safe.t, string) Either.t;
+      attempted: [ `JSON of Yojson.Safe.t | `String of string ];
     }
+  | Processing of { message: string }
 
 let error_to_yojson : error -> Yojson.Safe.t = function
 | Extraneous { path; name } ->
@@ -234,9 +230,10 @@ let error_to_yojson : error -> Yojson.Safe.t = function
       "message", `String message;
       ( "attempted",
         match attempted with
-        | Left json -> json
-        | Right s -> `String s );
+        | `JSON json -> json
+        | `String s -> `String s );
     ]
+| Processing { message } -> `Assoc [ "type", `String "processing"; "message", `String message ]
 
 let render_error ?emphasis error =
   let emphasis fmt s =
@@ -269,6 +266,7 @@ let render_error ?emphasis error =
       expected fmt_name name
   | Deserialization { message; attempted = _ } ->
     Format.asprintf "Invalid configuration at %a" emphasis message
+  | Processing { message } -> Format.asprintf "%a" emphasis message
 
 let get_name ll =
   List.find_map

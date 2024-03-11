@@ -1,17 +1,16 @@
 open! Core
 module Y = Hl_yaml.Unix
 
-let ok_or_failwith = function
-| Ok x -> x
-| Error s -> failwith s
-
 let%expect_test "Config YAML processing - Unix" =
   let test ?options raw =
     let parsed = Y.YAML.of_string ?options raw in
     let () =
       match parsed with
-      | Ok x -> x |> Y.YAML.to_string |> ok_or_failwith |> print_endline
-      | Error _ as err -> Stdlib.Printf.printf !"%{sexp: (_, string) Result.t}" err
+      | Ok x -> x |> Y.YAML.to_string |> Utils.ok_or_exn |> print_endline
+      | Error ll ->
+        Stdlib.Printf.printf
+          !"Error: %{Yojson.Safe.pretty_to_string}"
+          ([%to_yojson: Y.Spec.error list] ll)
     in
     Stdlib.flush_all ()
   in

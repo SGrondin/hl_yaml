@@ -68,7 +68,7 @@ end
 module type IO = sig
   type +'a t
 
-  type path
+  type filepath
 
   val return : 'a -> 'a t
 
@@ -80,5 +80,5 @@ module type IO = sig
 
   val map_s : ('a -> 'b t) -> 'a list -> 'b list t
 
-  val read_file : path -> string t
+  val read_file : filepath -> string t
 end

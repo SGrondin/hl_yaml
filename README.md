@@ -2,11 +2,11 @@
 
 High Level YAML ("HL YAML") is a lightweight all-in-one tool to read, parse, preprocess, validate and deserialize YAML files.
 
-For example, it enables configuration files written in YAML to reference environment variables, inline files, and import other configuration files.
-Additional features include the `<<:` "operator" similar to OCaml's `include`, and reusing config fragments through anchors (`&`) and references (`*`).
+For example, it enables configuration files written in YAML to reference environment variables, inline credentials files, and import other configuration files.
+Additional features are the `<<:` "operator" similar to OCaml's `include`, and reusing config fragments through anchors (`&`) and references (`*`).
 Features can be disabled individually and new ones added to serve specific use cases.
 
-For IO, it can use Lwt, Eio, or the standard library.
+For IO, HL YAML can use Lwt, Eio, or the standard library.
 
 ### Usage
 
@@ -14,8 +14,13 @@ For IO, it can use Lwt, Eio, or the standard library.
 opam install hl_yaml
 ```
 
-Suppose we have a file (`config.yml`) and we want to deserialize it into a value of type `config`.
-
+Suppose we have a file `config.yml`:
+```yaml
+name: Hello World
+api_key: !ENV_OPT API_KEY # use the `API_KEY` environment variable
+credentials: !FILE creds.json # use the `creds.json` file
+```
+and we want to deserialize it into a value of type `config`
 ```ocaml
 module Y = Hl_yaml.Unix
 
@@ -26,14 +31,9 @@ type config = {
 }
 [@@deriving of_yojson]
 
-(* contents of config.yml *)
-let raw = {|
-name: Hello World
-api_key: !ENV_OPT API_KEY # use the `API_KEY` environment variable
-credentials: !FILE creds.json # use the `creds.json` file
-|}
-
-let config = Y.parse ~of_yojson:config_of_yojson raw
+let config =
+  let raw = read_file "config.yml" in
+  Y.parse ~of_yojson:config_of_yojson raw
 ```
 
 The library performs the following steps:
@@ -43,23 +43,23 @@ The library performs the following steps:
 4. Validate against the JSON Schema `?validate` (optional, not used here)
 5. Deserialize using `~of_yojson`
 
-Tags (and more!) are documented below, notably `!CONFIG myfile.yml` lets you break up large files into smaller ones.
+Tags (and more!) are documented below, notably `!CONFIG` lets you import YAML files, allowing you to break large config files into smaller, more reusable ones.
 
-Tip: in the above example we didn't even need to load `config.yml` into the `raw` variable:
+Tip: in the above example we didn't even need to load `config.yml` into the `raw` variable!
 ```ocaml
 let config = Y.parse ~of_yojson:config_of_yojson "!CONFIG config.yml"
 ```
 
 #### Lwt
 
-Simply replace `module Y = Hl_yaml.Unix` with:
+Replace `module Y = Hl_yaml.Unix` with:
 ```ocaml
 module Y = Hl_yaml.Make_Lwt (Lwt) (Lwt_io)
 ```
 
 #### Eio
 
-Simply replace `module Y = Hl_yaml.Unix` with:
+Replace `module Y = Hl_yaml.Unix` with:
 ```ocaml
 module Y = Hl_yaml.Make_Eio (Eio)
 ```
@@ -68,21 +68,19 @@ module Y = Hl_yaml.Make_Eio (Eio)
 
 ### Tags
 
-Tags are YAML syntactical elements that can be placed immediately before "scalars": simple values like strings and integers.
+Tags are YAML syntactical elements that can be placed immediately before "scalars" (i.e. single values such as strings, booleans, numbers).
 
 By default, HL YAML recognizes the following tags:
-| Name | Example | Description |
-|------|---------|-------------|
-| !ENV | `!ENV var_name` | Replaces the `"var_name"` string with the contents of the environment variable of the same name. It is an error if the environment variable does not exist. |
-| !FILE | `!FILE dir1/file1.txt` | Replaces the `"dir1/file1.txt"` string with the contents of the file of the same name. It is an error if the file does not exist.<br />See `~file_path_filter_map` ([options](#options)) if you wish to validate and/or edit file paths dynamically. |
-| !CONFIG | `!CONFIG myfile.yml` | Replaces the `"myfile.yml"` string with the YAML structure found in the file of the same name. It is an error if the file does not exist.<br /><br />See `~config_path_filter_map` ([options](#options)) if you wish to validate and/or edit config paths dynamically. |
-| !ENV_FILE | `!ENV_FILE var_name` | Same as `!FILE` but reads from the file path found in the `var_name` environment variable. |
-| !ENV_OPT | `!ENV_OPT var_name` | Same as `!ENV`, but uses an empty scalar (equivalent to `""` or `null`) if the environment variable does not exist. |
-| !ENV_STR | `!ENV_STR var_name` | Same as `!ENV`, but quotes the resulting string (single quotes, backslash for escaping). |
+| Name | Description |
+|------|-------------|
+| `!ENV` | `!ENV var_name` replaces the `"var_name"` string with the contents of the environment variable of the same name. It is an error if the environment variable does not exist. |
+| `!FILE` | `!FILE dir1/file1.txt` replaces the `"dir1/file1.txt"` string with the contents of the file of the same name. It is an error if the file does not exist.<br />See `~file_path_filter_map` ([options](#options)) if you wish to validate and/or edit file paths dynamically. |
+| `!CONFIG` | `!CONFIG myfile.yml` replaces the `"myfile.yml"` string with the YAML structure found in the file of the same name. It is an error if the file does not exist.<br /><br />See `~config_path_filter_map` ([options](#options)) if you wish to validate and/or edit config paths dynamically. |
+| `!ENV_FILE` | Same as `!FILE` but reads from the file path found in the `var_name` environment variable. |
+| `!ENV_OPT` | Same as `!ENV`, but uses an empty scalar (equivalent to `""` or `null`) if the environment variable does not exist. |
+| `!ENV_STR` | Same as `!ENV`, but quotes the resulting string (single quotes, backslash for escaping). |
 
-The [`~process_scalar_tag` option](#options) can be used to support additional tags and/or to override the behavior of certain tags (such as to disable them for example).
-
-The `!CONFIG` tag can be disabled using the [`~enable_imports:false` option](#options).
+The [`~process_scalar_tag` option](#options) allows you to support additional tags and/or to override the behavior of certain tags. The `!CONFIG` tag can be disabled using the [`~enable_imports:false` option](#options).
 
 ### Anchors (`&`) and References (`*`)
 
@@ -120,17 +118,17 @@ environments:
 
 Remember that `&base_settings:` is equivalent to `&base_settings "":` it's a key-value pair where the key is the empty scalar. HL YAML drops all key-value pairs having an empty key from the final output.
 
-Anchors can be placed anywhere, not just on key-value pairs. Examples: `hello: &whom Bob` and `[m, &x iss, *x, ippi]`
+Anchors can be placed anywhere, not just on key-value pairs.<br />Examples: `hello: &whom Bob` and `[m, &x iss, *x, ippi]` (expands to `[m, iss, iss, ippi]`).
 
-By default, unused anchors are errors. See the [`~allow_unused_anchors` option](#options) to change this behavior.
-
-By default, attempting to re-define anchors is an error. See the [`~allow_redefining_anchors` option](#options) to change this behavior.
+By default, unused anchors and attempting to re-define anchors are errors. See the [options](#options) to change these behaviors.
 
 ### Includes
 
-To continue our previous example, what if we wanted a different **password** and **host** in each environment?
+To continue with our last example, what if we wanted a different **password** and **host** in each environment?
 
 ```yaml
+# Anchor: "base_settings", Key: ""
+# Empty keys are removed from the final output
 &base_settings:
   host: 127.0.0.1
   port: 5432
@@ -143,7 +141,7 @@ environments:
     password: !ENV DEV_PW
   staging:
     <<: *base_settings
-    host: 1.2.3.4
+    host: 1.2.3.4 # overrides the previous definition of "host"
     password: !ENV STAGING_PW
 ```
 expands to:
@@ -163,13 +161,13 @@ environments:
     password: my-staging-password
 ```
 
-HL YAML recognizes the special key `"<<"` and processes it similarly to OCaml's `include` keyword. In the example, `dev` grew from containing 2 key-value pairs (`<<` and `password`) to 5 key-value pairs when the key-value pairs contained under `<<` were pulled in.
+HL YAML recognizes the special key `"<<"` and processes it similarly to OCaml's `include` keyword. In the example, `dev` grew from containing 2 key-value pairs (`"<<"` and `"password"`) to 5 when the key-value pairs contained under the `"<<"` key were pulled in.
 
 Note that `staging` defined **host** twice, but the second definition (`host: 1.2.3.4`) shadowed the first (`host: 127.0.0.1`).
 
-Arrays can also be included using `<<` such as the `&supervisor` array:
+Arrays can also be included using `<<`, such as the `&supervisor` array in this example:
 ```yaml
-&supervisors supervisors:
+&supervisors supervisors: # Anchor: "supervisors", Key: "supervisors"
   - name: Daniel
     role: project manager
   - name: Elizabeth
@@ -177,7 +175,7 @@ Arrays can also be included using `<<` such as the `&supervisor` array:
 
 employees:
   - name: Alice
-    &programmer <<:
+    &programmer <<: # Anchor: "programmer", Key: "<<"
       role: programmer
       language: OCaml
   - name: Bob
@@ -211,13 +209,13 @@ employees:
     role: product owner
 ```
 
-The `!CONFIG` tag can be disabled using the [`~enable_includes:false` option](#options).
+The special behavior of the `"<<"` key can be disabled using the [`~enable_includes:false` option](#options).
 
 #### `!IF_DEF` and `!IF_NOT_DEF`
 
 Syntactically speaking, `!IF_DEF` and `!IF_NOT_DEF` are tags.
 
-Unlike all tags previously discussed, they cannot be placed on scalars, they must be on the **key** of key-value pairs.
+However unlike all tags previously discussed, they cannot be placed on scalars; they must be on the **key of key-value pairs**.
 
 ```yaml
 settings:
@@ -242,7 +240,7 @@ settings:
   debug: true
 ```
 
-In other words, `!IF_DEF` (and `!IF_NOT_DEF`) is simply a **conditional** `<<`.
+In other words, `!IF_DEF` and `!IF_NOT_DEF` are simply **conditional** versions of `"<<"`.
 
 ## Options
 

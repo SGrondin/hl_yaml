@@ -39,8 +39,12 @@ connection4:
   <<: *options
   !IF_DEF &save1 not-present:
     user: hello
+  !IF_NOT_DEF not-present:
+    user: goodbye
   !IF_NOT_DEF &save2 foo: &save3
     password: abc123
+  !IF_DEF foo:
+    password: def456
   anchors:
     save1: *save1
     save2: *save2
@@ -74,11 +78,11 @@ let%expect_test "Config YAML processing" =
       | Ok x ->
         x
         |> Y.YAML.to_string ~layout_style:`Block ~scalar_style:`Plain
-        |> Utils.ok_or_failwith
+        |> Utils.ok_or_exn
         |> Lwt_io.printl
-      | Error _ as err -> Lwt_io.printlf !"%{sexp: (_, string) Result.t}" err
+      | Error ll ->
+        Lwt_io.printlf !"Error: %{Yojson.Safe.pretty_to_string}" ([%to_yojson: Y.Spec.error list] ll)
     in
-
     Lwt_io.flush_all ()
   in
 
@@ -125,9 +129,12 @@ let%expect_test "Config YAML processing" =
       f: f |}];
 
   let* () = test "&x: 5\n&y: 6\nfoo: bar" in
-  [%expect {|
-    (Error  "YAML anchor &y is never used.\
-           \nYAML anchor &x is never used.") |}];
+  [%expect
+    {|
+    Error: [
+      { "type": "processing", "message": "YAML anchor &y is never used." },
+      { "type": "processing", "message": "YAML anchor &x is never used." }
+    ] |}];
 
   let* () =
     test
@@ -151,7 +158,8 @@ employees:
   - <<: *supervisors
 |}
   in
-  [%expect {|
+  [%expect
+    {|
     supervisors:
     - name: Daniel
       role: project manager
@@ -176,7 +184,17 @@ employees:
   [%expect {| foo: bar |}];
 
   let* () = test ~options:(Y.make_options ()) config2 in
-  [%expect {| (Error "Duplicate YAML anchor name &ref") |}];
+  [%expect {| Error: [ { "type": "processing", "message": "Duplicate YAML anchor name &ref" } ] |}];
+
+  let* () = test "abc: *def" in
+  [%expect
+    {|
+    Error: [
+      {
+        "type": "processing",
+        "message": "YAML *def references the missing anchor &def"
+      }
+    ] |}];
 
   let* () = test ~options:(Y.make_options ~allow_redefining_anchors:true ()) config2 in
   [%expect {|
@@ -192,17 +210,14 @@ employees:
     foo:
     bar: |}];
 
-  let* () =
-    test config1
-      ~options:
-        (Y.make_options
-           ~get_env_var:(function
-             | "foo" -> Some "bar "
-             | "PORT" -> Some "456"
-             | "world" -> Some "WORLD"
-             | _ -> None)
-           () )
+  let get_env_var = function
+    | "foo" -> Some "bar "
+    | "PORT" -> Some "456"
+    | "world" -> Some "WORLD"
+    | _ -> None
   in
+
+  let* () = test config1 ~options:(Y.make_options ~get_env_var ()) in
   [%expect
     {|
     hello:
@@ -229,8 +244,8 @@ employees:
     connection4:
       host: 123
       port: 456
-      user: user
-      password: supersecret2
+      user: goodbye
+      password: def456
       anchors:
         save1:
           user: hello
@@ -250,14 +265,7 @@ employees:
 
   let* () =
     test config1
-      ~options:
-        (Y.make_options ~enable_includes:false
-           ~get_env_var:(function
-             | "foo" -> Some "bar "
-             | "PORT" -> Some "456"
-             | "world" -> Some "WORLD"
-             | _ -> None)
-           () )
+      ~options:(Y.make_options ~enable_includes:false ~enable_conditional_includes:false ~get_env_var ())
   in
   [%expect
     {|
@@ -305,9 +313,132 @@ employees:
         user: user
         password: supersecret2
       not-present:
-        user: hello
+        user: goodbye
       foo:
-        password: abc123
+        password: def456
+      anchors:
+        save1:
+          user: hello
+        save2:
+          password: abc123
+        save3:
+          password: abc123
+    admin_connections:
+    - connection1
+    user_connections:
+    - connection2
+    - connection3
+    all_connections:
+    - <<:
+      - connection1
+    - <<:
+      - connection2
+      - connection3 |}];
+
+  let* () =
+    test config1
+      ~options:(Y.make_options ~enable_includes:true ~enable_conditional_includes:false ~get_env_var ())
+  in
+  [%expect
+    {|
+    hello:
+    - '''WORLD'''
+    - 'bar '
+    - 'bar '
+    password1: supersecret1
+    password2: supersecret2
+    connection1:
+      host: 123
+      port: 456
+      user: admin
+      password: supersecret1
+    connection2:
+      host: 123
+      port: 456
+      user: user
+      password: supersecret2
+    connection3:
+      host: 123
+      port: 456
+      user: user
+      password: supersecret3
+    connection4:
+      host: 123
+      port: 456
+      user: user
+      password: supersecret2
+      not-present:
+        user: goodbye
+      foo:
+        password: def456
+      anchors:
+        save1:
+          user: hello
+        save2:
+          password: abc123
+        save3:
+          password: abc123
+    admin_connections:
+    - connection1
+    user_connections:
+    - connection2
+    - connection3
+    all_connections:
+    - connection1
+    - connection2
+    - connection3 |}];
+
+  let* () =
+    test config1
+      ~options:(Y.make_options ~enable_includes:false ~enable_conditional_includes:true ~get_env_var ())
+  in
+  [%expect
+    {|
+    hello:
+    - '''WORLD'''
+    - 'bar '
+    - 'bar '
+    password1: supersecret1
+    password2: supersecret2
+    connection1:
+      <<:
+        host: 123
+        port: 456
+      user: admin
+      password: supersecret1
+    connection2:
+      <<:
+        <<:
+          <<:
+            host: 123
+            port: 456
+          user: admin
+          password: supersecret1
+        user: user
+        password: supersecret2
+    connection3:
+      <<:
+        <<:
+          <<:
+            host: 123
+            port: 456
+          user: admin
+          password: supersecret1
+        user: user
+        password: supersecret2
+      password: supersecret3
+    connection4:
+      <<:
+        <<:
+          <<:
+            host: 123
+            port: 456
+          user: admin
+          password: supersecret1
+        user: user
+        password: supersecret2
+      user: goodbye
+      password: def456
       anchors:
         save1:
           user: hello

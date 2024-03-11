@@ -12,11 +12,11 @@ module Lwt_expect_tests = struct
   end
 end
 
-let ok_or_failwith = function
+let ok_or_exn = function
 | Ok x -> x
-| Error s -> failwith s
+| Error ll -> [%to_yojson: Hl_yaml.Spec.error list] ll |> Yojson.Safe.pretty_to_string |> failwith
 
-let map_path s = Some (Filename.concat "../../../test/files" s)
+let map_path s = Filename.concat "../../../test/files" s
 
 let map_path_lwt s = Lwt.return (map_path s)
 

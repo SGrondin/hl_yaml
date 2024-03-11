@@ -65,8 +65,9 @@ type error =
     }
   | Deserialization of {
       message: string;
-      attempted: (Yojson.Safe.t, string) Either.t;
+      attempted: [ `JSON of Yojson.Safe.t | `String of string ];
     }
+  | Processing of { message: string }
 [@@deriving to_yojson]
 
 val validate : ?path:path -> ?nullable:bool -> t -> Yojson.Safe.t -> error list

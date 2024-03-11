@@ -8,8 +8,9 @@ let%expect_test "Config YAML processing - Lwt" =
     let* parsed = Y.YAML.of_string ?options raw in
     let* () =
       match parsed with
-      | Ok x -> x |> Y.YAML.to_string |> Utils.ok_or_failwith |> Lwt_io.printl
-      | Error _ as err -> Lwt_io.printlf !"%{sexp: (_, string) Result.t}" err
+      | Ok x -> x |> Y.YAML.to_string |> Utils.ok_or_exn |> Lwt_io.printl
+      | Error ll ->
+        Lwt_io.printlf !"Error: %{Yojson.Safe.pretty_to_string}" ([%to_yojson: Y.Spec.error list] ll)
     in
     Lwt_io.flush_all ()
   in
