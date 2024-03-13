@@ -1,3 +1,7 @@
+module OneOrMany : sig
+  type 'a t = 'a list [@@deriving yojson]
+end
+
 type object_entry = {
   key: string;
   required: bool;
@@ -19,7 +23,7 @@ and t =
   | JString
   | JEnum of enum
   | JArray of t
-  | JOneOrArray of t
+  | JOneOrArray of t (* Use with `foo OneOrMany.t` instead of `foo list` in your type definition *)
   | JObject of t
   | JSchema of {
       name: string;
@@ -45,6 +49,7 @@ type error =
   | Extraneous of {
       path: path;
       name: string option;
+      extra: Yojson.Safe.t;
     }
   | Missing of {
       path: path;
@@ -61,7 +66,7 @@ type error =
       path: path;
       name: string option;
       expected: Yojson.Basic.t list;
-      found: Yojson.Basic.t;
+      found: Yojson.Safe.t;
     }
   | Deserialization of {
       message: string;
@@ -72,4 +77,4 @@ type error =
 
 val validate : ?path:path -> ?nullable:bool -> t -> Yojson.Safe.t -> error list
 
-val render_error : ?emphasis:(string -> string) -> error -> string
+val error_to_string : ?emphasis:(string -> string) -> error -> string

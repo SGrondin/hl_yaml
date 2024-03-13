@@ -1,0 +1,10 @@
+- firstName: Bobby
+  lastName: Tables
+  age: 52
+  roles: developer
+
+- firstName: John
+  lastName: Doe
+  roles:
+    - manager
+    - devops

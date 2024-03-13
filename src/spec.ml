@@ -24,6 +24,15 @@ module StringMap = struct
     `Assoc (StringMap.fold (fun key data acc -> (key, f data) :: acc) map [])
 end
 
+module OneOrMany = struct
+  type 'a t = 'a list [@@deriving to_yojson]
+
+  let of_yojson (type el) (el_of_yojson : Yojson.Safe.t -> (el, string) result) = function
+  | `Null -> Ok []
+  | `List _ as json -> [%of_yojson: el list] json
+  | json -> [%of_yojson: el] json |> Result.map (fun x -> [ x ])
+end
+
 type object_entry = {
   key: string;
   required: bool;
@@ -68,6 +77,18 @@ let rec of_yojson : Yojson.Safe.t -> t = function
 | `List (nested :: _) -> JArray (of_yojson nested)
 | `Assoc [] -> JObject JAny
 | `Assoc ((_, nested) :: _) -> JObject (of_yojson nested)
+| (`Intlit _ | `Tuple _ | `Variant _) as json -> of_yojson (Yojson.Safe.to_basic json :> Yojson.Safe.t)
+
+let of_yojson_non_rec : Yojson.Safe.t -> t = function
+| `Null -> JNull
+| `Bool _ -> JBool
+| `Int _ -> JInt
+| `Float _ -> JFloat
+| `String _ -> JString
+| `List [] -> JArray JAny
+| `List _ -> JArray JAny
+| `Assoc [] -> JObject JAny
+| `Assoc _ -> JObject JAny
 | (`Intlit _ | `Tuple _ | `Variant _) as json -> of_yojson (Yojson.Safe.to_basic json :> Yojson.Safe.t)
 
 let format fmt json =
@@ -161,6 +182,7 @@ type error =
   | Extraneous of {
       path: path;
       name: string option;
+      extra: Yojson.Safe.t;
     }
   | Missing of {
       path: path;
@@ -177,7 +199,7 @@ type error =
       path: path;
       name: string option;
       expected: Yojson.Basic.t list;
-      found: Yojson.Basic.t;
+      found: Yojson.Safe.t;
     }
   | Deserialization of {
       message: string;
@@ -186,13 +208,14 @@ type error =
   | Processing of { message: string }
 
 let error_to_yojson : error -> Yojson.Safe.t = function
-| Extraneous { path; name } ->
+| Extraneous { path; name; extra } ->
   `Assoc
     [
       "type", `String "extraneous";
       "name", [%to_yojson: string option] name;
       "path", `String (path_to_string path);
       "path_parts", path_to_yojson path;
+      "extra", extra;
     ]
 | Missing { path; name; missing } ->
   `Assoc
@@ -235,7 +258,7 @@ let error_to_yojson : error -> Yojson.Safe.t = function
     ]
 | Processing { message } -> `Assoc [ "type", `String "processing"; "message", `String message ]
 
-let render_error ?emphasis error =
+let error_to_string ?emphasis error =
   let emphasis fmt s =
     let f = Option.value emphasis ~default:Fun.id in
     Format.fprintf fmt "%s" (f s)
@@ -251,21 +274,22 @@ let render_error ?emphasis error =
       Format.fprintf fmt "option"
     | _ -> Format.fprintf fmt "key"
   in
+  let fmt_json fmt j = Format.fprintf fmt "%s" (Yojson.Safe.to_string j) in
   match error with
-  | Extraneous { path; name } ->
-    Format.asprintf "Extraneous %a: %a%a" key_or_option path fmt_path path fmt_name name
+  | Extraneous { path; name; extra } ->
+    Format.asprintf "Extraneous %a: %a (%a)%a" key_or_option path fmt_path path format
+      (of_yojson_non_rec extra) fmt_name name
   | Missing { path; name; missing } ->
     Format.asprintf "Missing %a: %a (%a)%a" key_or_option path fmt_path path format missing fmt_name name
   | Type { path; name; expected; found } ->
-    Format.asprintf "%a expected a %a, but found: %a%a" fmt_path path format expected format
-      (of_yojson found) fmt_name name
+    Format.asprintf "Type mismatch at %a, expected %a, but found: %a%a" fmt_path path format expected
+      format (of_yojson found) fmt_name name
   | Incorrect_value { path; name; expected; found } ->
-    let render_json fmt j = Format.fprintf fmt "%s" (Yojson.Basic.to_string j) in
-    Format.asprintf "%a incorrect value %a, expected one of: %a%a" fmt_path path render_json found
-      (fmt_list ~f:render_json ~sep:" | ")
-      expected fmt_name name
-  | Deserialization { message; attempted = _ } ->
-    Format.asprintf "Invalid configuration at %a" emphasis message
+    Format.asprintf "Incorrect value at %a, found %a, but expected one of: %a%a" fmt_path path fmt_json
+      found (fmt_list ~f:fmt_json ~sep:" | ")
+      (expected :> Yojson.Safe.t list)
+      fmt_name name
+  | Deserialization { message; attempted = _ } -> Format.asprintf "Unexpected format: %a" emphasis message
   | Processing { message } -> Format.asprintf "%a" emphasis message
 
 let get_name ll =
@@ -290,7 +314,7 @@ let rec validate ~path (json : Yojson.Safe.t) spec ~nullable =
   | JString, `String _ -> []
   | JEnum { expected; _ }, found when List.mem (Yojson.Safe.to_basic found) expected -> []
   | JEnum { expected; json_types; _ }, found when List.mem (of_yojson found) json_types ->
-    [ Incorrect_value { path; name = None; expected; found = Yojson.Safe.to_basic found } ]
+    [ Incorrect_value { path; name = None; expected; found } ]
   | (JArray JAny | JOneOrArray JAny), `List _ -> []
   | (JArray nested_type | JOneOrArray nested_type), `List ll ->
     List.mapi
@@ -305,7 +329,8 @@ let rec validate ~path (json : Yojson.Safe.t) spec ~nullable =
     let passed = List.fold_left (fun acc (key, json) -> StringMap.add key json acc) StringMap.empty ll in
     StringMap.fold2 passed keys ~init:[] ~f:(fun ~key ~data acc ->
       match data with
-      | `Left _ when reject_extras -> Extraneous { path = Dot key :: path; name = get_name ll } :: acc
+      | `Left extra when reject_extras ->
+        Extraneous { path = Dot key :: path; name = get_name ll; extra } :: acc
       | `Right { spec; required = true; _ } ->
         Missing { path = Dot key :: path; name = get_name ll; missing = spec } :: acc
       | `Left _

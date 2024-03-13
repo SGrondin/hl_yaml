@@ -5,7 +5,7 @@ let%expect_test "Validations" =
   let test json spec =
     validate spec json |> function
     | [] -> print_endline "Passed"
-    | ll -> List.map ll ~f:render_error |> String.concat_lines |> print_endline
+    | ll -> List.map ll ~f:error_to_string |> String.concat_lines |> print_endline
   in
 
   test (`List []) (JArray JAny);
@@ -18,7 +18,7 @@ let%expect_test "Validations" =
   [%expect {| Passed |}];
 
   test (`List [ `String ""; `Int 5 ]) (JArray JString);
-  [%expect {| $[1] expected a String, but found: Integer |}];
+  [%expect {| Type mismatch at $[1], expected String, but found: Integer |}];
 
   test (`List [ `String ""; `Int 5 ]) (JArray JAtom);
   [%expect {| Passed |}];
@@ -27,7 +27,7 @@ let%expect_test "Validations" =
   [%expect {| Passed |}];
 
   test (`List [ `Int 5 ]) (JArray JFloat);
-  [%expect {| $[0] expected a Double, but found: Integer |}];
+  [%expect {| Type mismatch at $[0], expected Double, but found: Integer |}];
 
   test (`List []) (JArray JNumeric);
   [%expect {| Passed |}];
@@ -35,8 +35,8 @@ let%expect_test "Validations" =
   test (`List [ `String "abc"; `String "def"; `Int 123 ]) (JArray (make_enum [ `String "abc"; `Int 111 ]));
   [%expect
     {|
-    $[1] incorrect value "def", expected one of: "abc" | 111
-    $[2] incorrect value 123, expected one of: "abc" | 111 |}];
+    Incorrect value at $[1], found "def", but expected one of: "abc" | 111
+    Incorrect value at $[2], found 123, but expected one of: "abc" | 111 |}];
 
   test (`List [ `Int 111; `String "abc"; `Int 111 ]) (JOneOrArray (make_enum [ `String "abc"; `Int 111 ]));
   [%expect {| Passed |}];
@@ -51,13 +51,13 @@ let%expect_test "Validations" =
     (`Assoc [ "extra", `List [] ])
     (make_schema ~name:"foo" ~reject_extras:true [ { key = "abc"; required = true; spec = JAtom } ]);
   [%expect {|
-    Extraneous key: $.extra
+    Extraneous key: $.extra (Array)
     Missing key: $.abc (String) |}];
 
   test
     (`List [ `Int 5; `String "abc" ])
     (make_schema ~name:"foo" ~reject_extras:true [ { key = "abc"; required = true; spec = JAtom } ]);
-  [%expect {| $ expected a foo Object, but found: Array of Integers |}];
+  [%expect {| Type mismatch at $, expected foo Object, but found: Array of Integers |}];
 
   test (`Assoc []) (JObject (JArray JString));
   [%expect {| Passed |}];
@@ -67,9 +67,9 @@ let%expect_test "Validations" =
     (JObject (JArray JString));
   [%expect
     {|
-    $.b expected a Array of Strings, but found: String
-    $["c d"][0] expected a String, but found: Null
-    $["c d"][1] expected a String, but found: Integer |}];
+    Type mismatch at $.b, expected Array of Strings, but found: String
+    Type mismatch at $["c d"][0], expected String, but found: Null
+    Type mismatch at $["c d"][1], expected String, but found: Integer |}];
 
   test
     (`Assoc
@@ -91,5 +91,5 @@ let%expect_test "Validations" =
        ] );
   [%expect
     {|
-    $.g expected a Boolean, but found: Null
-    $["c d"][0] expected a String, but found: Null |}]
+    Type mismatch at $.g, expected Boolean, but found: Null
+    Type mismatch at $["c d"][0], expected String, but found: Null |}]

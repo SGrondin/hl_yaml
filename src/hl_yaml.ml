@@ -92,6 +92,10 @@ module Make (IO : S.IO) = struct
 
   let default_options = make_options ()
 
+  let ok_or_raise = function
+  | Ok x -> x
+  | Error errors -> List.map Spec.error_to_string errors |> String.concat "\n" |> Stdlib.failwith
+
   module Spec = Spec
 
   module JSON = struct
@@ -407,6 +411,8 @@ module type Intf = sig
     ?process_scalar_tag:(tag:string -> string -> [ `Scalar of string | `YAML of Yaml.yaml ] io option) ->
     unit ->
     options
+
+  val ok_or_raise : ('a, Spec.error list) result -> 'a
 
   module JSON : sig
     val to_yaml_string : Yojson.Safe.t -> (string, Spec.error list) result

@@ -32,6 +32,8 @@ module type Intf = sig
     unit ->
     options
 
+  val ok_or_raise : ('a, Spec.error list) result -> 'a
+
   module JSON : sig
     val to_yaml_string : Yojson.Safe.t -> (string, Spec.error list) result
   end
