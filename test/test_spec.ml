@@ -51,8 +51,8 @@ let%expect_test "Validations" =
     (`Assoc [ "extra", `List [] ])
     (make_schema ~name:"foo" ~reject_extras:true [ { key = "abc"; required = true; spec = JAtom } ]);
   [%expect {|
-    Extraneous key: $.extra (Array)
-    Missing key: $.abc (String) |}];
+    Missing key: $.abc (String)
+    Extraneous key: $.extra (Array) |}];
 
   test
     (`List [ `Int 5; `String "abc" ])
@@ -91,5 +91,53 @@ let%expect_test "Validations" =
        ] );
   [%expect
     {|
-    Type mismatch at $.g, expected Boolean, but found: Null
-    Type mismatch at $["c d"][0], expected String, but found: Null |}]
+    Type mismatch at $["c d"][0], expected String, but found: Null
+    Type mismatch at $.g, expected Boolean, but found: Null |}];
+
+  validate
+    (make_schema ~name:"foo" ~reject_extras:false
+       [
+         { key = "a"; required = true; spec = JArray JAtom };
+         { key = "b"; required = true; spec = JOneOrArray JAtom };
+         { key = "c d"; required = true; spec = JOneOrArray JAtom };
+         { key = "e"; required = false; spec = JBool };
+         { key = "f"; required = false; spec = JBool };
+         { key = "g"; required = true; spec = JBool };
+       ] )
+    (`Assoc
+      [
+        "a", `List [];
+        "b", `String "x";
+        "c d", `List [ `Null; `Int 5; `String "y" ];
+        "f", `Null;
+        "g", `Null;
+      ] )
+  |> List.map ~f:error_to_yojson
+  |> (fun ll -> `List ll)
+  |> Yojson.Safe.pretty_to_string
+  |> print_endline;
+  [%expect {|
+    [
+      {
+        "type": "type",
+        "name": null,
+        "path": "$[\"c d\"][0]",
+        "path_parts": [
+          { "type": "key", "key": "$" },
+          { "type": "key", "key": "c d" },
+          { "type": "index", "index": 0 }
+        ],
+        "expected": [ "JAtom" ],
+        "found": null
+      },
+      {
+        "type": "type",
+        "name": null,
+        "path": "$.g",
+        "path_parts": [
+          { "type": "key", "key": "$" }, { "type": "dot", "dot": "g" }
+        ],
+        "expected": [ "JBool" ],
+        "found": null
+      }
+    ] |}]

@@ -1,5 +1,9 @@
-module OneOrMany : sig
+module OneOrList : sig
   type 'a t = 'a list [@@deriving yojson]
+end
+
+module OneOrArray : sig
+  type 'a t = 'a array [@@deriving yojson]
 end
 
 type object_entry = {
@@ -23,7 +27,9 @@ and t =
   | JString
   | JEnum of enum
   | JArray of t
-  | JOneOrArray of t (* Use with `foo OneOrMany.t` instead of `foo list` in your type definition *)
+  (* Use JOneOrArray with `'a OneOrList.t` or `'a OneOrArray.t`
+     instead of `'a list` or `'a array` (respectively) in your type definition *)
+  | JOneOrArray of t
   | JObject of t
   | JSchema of {
       name: string;

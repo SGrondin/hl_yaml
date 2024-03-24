@@ -57,15 +57,20 @@ let%expect_test "Config YAML processing" =
         - foobar |}];
 
   let* () =
+    let get_env_var = function
+      | "env1" -> Some "got it"
+      | _ -> None
+    in
     let* raw =
       Lwt_io.with_file ~flags:[ O_RDONLY; O_NONBLOCK ] ~mode:Input "../../../test/files/advanced.yml"
         Lwt_io.read
     in
-    test ~options:(Y.make_options ~config_path_filter_map:Utils.map_path_lwt ()) raw
+    test ~options:(Y.make_options ~get_env_var ~config_path_filter_map:Utils.map_path_lwt ()) raw
   in
   [%expect
     {|
-    hello: world
+    exists: got it
+    missing:
     abc: def
     some array:
     - name: Alice

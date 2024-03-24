@@ -179,16 +179,18 @@ module Make (IO : S.IO) = struct
           let* path = state.options.file_path_filter_map filename in
           to_filepath path |> state.options.get_file )
       in
-      let make_key key =
-        let buf = Buffer.create (String.length key + 10) in
-        Buffer.add_char buf '\'';
+      let quote_string q str =
+        let buf = Buffer.create (String.length str + 10) in
+        Buffer.add_char buf q;
         String.iter
           (function
-            | '\'' -> Buffer.add_string buf "\\'"
+            | c when Char.equal c q ->
+              Buffer.add_char buf '\\';
+              Buffer.add_char buf q
             | '\\' -> Buffer.add_string buf "\\\\"
             | c -> Buffer.add_char buf c)
-          key;
-        Buffer.add_char buf '\'';
+          str;
+        Buffer.add_char buf q;
         Buffer.contents buf
       in
       let env_var_exists name =
@@ -309,7 +311,8 @@ module Make (IO : S.IO) = struct
             | None, "!ENV_OPT" -> get_env_var ~default:"" value |> make_scalar |> IO.return
             | None, "!FILE" -> get_file value >|= make_scalar
             | None, "!ENV_FILE" -> get_env_var value |> get_file >|= make_scalar
-            | None, "!ENV_STR" -> get_env_var value |> make_key |> make_scalar |> IO.return
+            | None, "!ENV_SQ" -> get_env_var value |> quote_string '\'' |> make_scalar |> IO.return
+            | None, "!ENV_DQ" -> get_env_var value |> quote_string '"' |> make_scalar |> IO.return
             | None, "!CONFIG" when state.options.enable_imports -> get_config value
             | None, "!CONFIG" -> failwith "YAML !CONFIG imports are disabled"
             | None, _ -> failwithf "Undefined YAML tag: %s" tag () ))

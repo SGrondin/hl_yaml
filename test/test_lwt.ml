@@ -15,12 +15,20 @@ let%expect_test "Config YAML processing - Lwt" =
     Lwt_io.flush_all ()
   in
 
+  let get_env_var = function
+    | "env1" -> Some "got it"
+    | _ -> None
+  in
+
   let* () =
-    test ~options:(Y.make_options ~config_path_filter_map:Utils.map_path_lwt ()) "!CONFIG advanced.yml"
+    test
+      ~options:(Y.make_options ~get_env_var ~config_path_filter_map:Utils.map_path_lwt ())
+      "!CONFIG advanced.yml"
   in
   [%expect
     {|
-    hello: world
+    exists: got it
+    missing:
     abc: def
     some array:
     - name: Alice
@@ -32,7 +40,7 @@ let%expect_test "Config YAML processing - Lwt" =
   let* () =
     let* x =
       Y.parse
-        ~options:(Y.make_options ~config_path_filter_map:Utils.map_path_lwt ())
+        ~options:(Y.make_options ~get_env_var ~config_path_filter_map:Utils.map_path_lwt ())
         ~of_yojson:Utils.foo_of_yojson "!CONFIG advanced.yml"
     in
     let* () = Utils.render x |> Lwt_io.printl in
@@ -40,7 +48,7 @@ let%expect_test "Config YAML processing - Lwt" =
   in
   [%expect
     {|
-    ((hello world) (abc DEF)
+    ((exists ("got it")) (missing ()) (abc DEF)
      (names
       (((name Alice)) ((name Bob)) ((name Charlie)) ((name Diane)) ((name Eric))))) |}];
 

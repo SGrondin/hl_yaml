@@ -5,10 +5,12 @@ module Y = Hl_yaml.Make_Lwt (Lwt) (Lwt_io)
 
 let config1 =
   {|
-&abc: !ENV_STR world
+&abc1: !ENV_SQ world
+&abc2: !ENV_DQ world
 
 hello:
-  - *abc
+  - *abc1
+  - *abc2
   - &foo !ENV foo
   - *foo
 
@@ -213,7 +215,7 @@ employees:
   let get_env_var = function
     | "foo" -> Some "bar "
     | "PORT" -> Some "456"
-    | "world" -> Some "WORLD"
+    | "world" -> Some "WORLD-\\-\"-"
     | _ -> None
   in
 
@@ -221,7 +223,8 @@ employees:
   [%expect
     {|
     hello:
-    - '''WORLD'''
+    - '''WORLD-\\-"-'''
+    - '"WORLD-\\-\"-"'
     - 'bar '
     - 'bar '
     password1: supersecret1
@@ -270,7 +273,8 @@ employees:
   [%expect
     {|
     hello:
-    - '''WORLD'''
+    - '''WORLD-\\-"-'''
+    - '"WORLD-\\-\"-"'
     - 'bar '
     - 'bar '
     password1: supersecret1
@@ -342,7 +346,8 @@ employees:
   [%expect
     {|
     hello:
-    - '''WORLD'''
+    - '''WORLD-\\-"-'''
+    - '"WORLD-\\-\"-"'
     - 'bar '
     - 'bar '
     password1: supersecret1
@@ -395,7 +400,8 @@ employees:
   [%expect
     {|
     hello:
-    - '''WORLD'''
+    - '''WORLD-\\-"-'''
+    - '"WORLD-\\-\"-"'
     - 'bar '
     - 'bar '
     password1: supersecret1

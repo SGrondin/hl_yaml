@@ -17,7 +17,7 @@ type person = {
   first_name: string option; [@key "firstName"] [@default None]
   last_name: string; [@key "lastName"]
   age: int option; [@default None]
-  roles: role list; [@of_yojson Y.Spec.OneOrMany.of_yojson role_of_yojson]
+  roles: role list; [@of_yojson Y.Spec.OneOrList.of_yojson role_of_yojson]
 }
 [@@deriving sexp_of, of_yojson]
 
@@ -54,8 +54,8 @@ let%expect_test "README Full Validation example" =
   [%expect
     {|
     Incorrect value at $[0].roles, found "Developer", but expected one of: "manager" | "developer" | "devops"
-    Missing key: $[1].lastName (String)
-    Extraneous key: $[1].dateOfBirth (String) |}];
+    Extraneous key: $[1].dateOfBirth (String)
+    Missing key: $[1].lastName (String) |}];
 
   test "people_fixed.yml";
   [%expect

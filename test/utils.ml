@@ -33,7 +33,8 @@ let enum_of_yojson = function
 type name = { name: string } [@@deriving sexp_of, of_yojson]
 
 type foo = {
-  hello: string;
+  exists: string option;
+  missing: string option;
   abc: enum;
   names: name list; [@key "some array"]
 }

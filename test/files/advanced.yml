@@ -1,4 +1,5 @@
-hello: world
+exists: !ENV_OPT env1
+missing: !ENV_OPT env2
 <<: !CONFIG simple.yml
 some array:
   - name: Alice

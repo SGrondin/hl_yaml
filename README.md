@@ -9,6 +9,17 @@ HL YAML's features can be disabled individually and new ones added to serve spec
 
 For IO, HL YAML can use Lwt, Eio, or the standard library.
 
+## Why YAML?
+
+Despite its [shortcomings](https://ruudvanasseldonk.com/2023/01/11/the-yaml-document-from-hell), YAML is the author's favored configuration file format.
+
+Why? It features just the right amount of syntactic power and converts cleanly to JSON.
+Too little power and we end up copy-pasting repetitive sections; too much power (conditionals, loops, etc) and we've created a programming language in the worst setting possible.
+
+HL YAML strikes a balance: anchors and tags allow reuse, while tags act as "hooks" for hygienic macro expansions.
+
+Give it a try, you'll be surprised.
+
 ## Usage
 
 ```
@@ -44,7 +55,7 @@ The library performs the following steps:
 4. Validate against the JSON Spec `?validate` (optional, not used here)
 5. Deserialize using `~of_yojson`
 
-Here we used two tags (`!ENV` and `!FILE`) to provide dynamism. Other notable tags include `!CONFIG` which lets you import YAML files, allowing you to break large config files into smaller, more reusable ones.
+Here we used two tags (`!ENV_OPT` and `!FILE`) to provide dynamism. Other notable tags include `!CONFIG` which lets you import YAML files, allowing you to break large config files into smaller, more reusable ones.
 
 Tip 1: in the previous example we don't even need to read the `config.yml` file, we can let HL YAML do it for us:
 ```ocaml
@@ -80,10 +91,11 @@ By default, HL YAML recognizes the following tags:
 |------|-------------|
 | `!ENV` | `!ENV var_name` replaces the `"var_name"` string with the contents of the environment variable of the same name. It is an error if the environment variable does not exist. |
 | `!FILE` | `!FILE dir1/file1.txt` replaces the `"dir1/file1.txt"` string with the contents of the file of the same name. It is an error if the file does not exist.<br />See `~file_path_filter_map` ([options](#options)) if you wish to validate and/or edit file paths dynamically. |
-| `!CONFIG` | `!CONFIG myfile.yml` replaces the `"myfile.yml"` string with the YAML structure found in the file of the same name. It is an error if the file does not exist.<br /><br />See `~config_path_filter_map` ([options](#options)) if you wish to validate and/or edit config paths dynamically. |
+| `!CONFIG` | `!CONFIG dir1/myfile.yml` replaces the `"dir1/myfile.yml"` string with the YAML structure found in the file of the same name. It is an error if the file does not exist.<br /><br />See `~config_path_filter_map` ([options](#options)) if you wish to validate and/or edit config paths dynamically. |
 | `!ENV_FILE` | Same as `!FILE` but reads from the file path found in the environment variable. |
 | `!ENV_OPT` | Same as `!ENV`, but uses an empty scalar (equivalent to `""` or `null`) if the environment variable does not exist. |
-| `!ENV_STR` | Same as `!ENV`, but quotes the resulting string (single quotes, backslash for escaping). |
+| `!ENV_SQ` | Same as `!ENV`, but quotes the resulting string (single quotes, backslash for escaping). |
+| `!ENV_DQ` | Same as `!ENV`, but quotes the resulting string (double quotes, backslash for escaping). |
 
 The [`~process_scalar_tag`](#options) option allows you to support additional tags and/or to override the behavior of certain tags. The `!CONFIG` tag can be disabled using the [`~enable_imports:false`](#options) option.
 
@@ -123,18 +135,17 @@ environments:
 
 Remember that `&base_settings:` is equivalent to `&base_settings "":` it's a key-value pair where the key is the empty scalar. HL YAML drops all key-value pairs having an empty key from the final output.
 
-Anchors can be placed anywhere, not just on key-value pairs, e.g. `[m, &x iss, *x, ippi]` expands to `[m, iss, iss, ippi]`.
+Anchors can be placed anywhere, not just on key-value pairs, for example: `[m, &x iss, *x, ippi]` expands to `[m, iss, iss, ippi]`.
 
-By default, unused anchors and attempting to re-define anchors are errors. See the [options](#options) to change these behaviors.
+By default, both unused anchors and attempting to re-define anchors are errors. See the [options](#options) to change these behaviors.
 
 ## Includes
 
 To continue with our last example, what if we wanted a different **password** and **host** in each environment?
 
 ```yaml
-# Anchor: "base_settings", Key: ""
 # Reminder: HL YAML removes empty keys from the final output
-&base_settings:
+&base_settings: # Anchor: "base_settings", Key: ""
   host: 127.0.0.1
   port: 5432
   dbname: postgres
@@ -308,7 +319,7 @@ type person = {
   last_name: string; [@key "lastName"]
   age: int option; [@default None]
 
-  roles: role list; [@of_yojson Y.Spec.OneOrMany.of_yojson role_of_yojson]
+  roles: role list; [@of_yojson Y.Spec.OneOrList.of_yojson role_of_yojson]
   (* Here we pass a custom @of_yojson because
      according to people.yml, "roles" can be
      either a single role or a YAML list of them *)
@@ -326,7 +337,7 @@ let spec =
         { key = "firstName"; required = false; spec = JString };
         { key = "lastName"; required = true; spec = JString };
         { key = "age"; required = false; spec = JInt };
-        (* Note the use of `JOneOrArray` instead of `JArray` on "roles" *)
+        (* Note the use of `JOneOrArray` instead of `JArray` on "roles", see the earlier comment on type person.roles *)
         { key = "roles"; required = true; spec = JOneOrArray role };
       ]
   in

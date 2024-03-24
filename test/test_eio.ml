@@ -17,10 +17,18 @@ let%expect_test "Config YAML processing - Eio" =
     Stdlib.flush_all ()
   in
 
-  test ~options:(Y.make_options ~config_path_filter_map:Utils.map_path ()) "!CONFIG advanced.yml";
+  let get_env_var = function
+    | "env1" -> Some "got it"
+    | _ -> None
+  in
+
+  test
+    ~options:(Y.make_options ~get_env_var ~config_path_filter_map:Utils.map_path ())
+    "!CONFIG advanced.yml";
   [%expect
     {|
-    hello: world
+    exists: got it
+    missing:
     abc: def
     some array:
     - name: Alice
@@ -30,12 +38,12 @@ let%expect_test "Config YAML processing - Eio" =
     - name: Eric |}];
 
   Y.parse ~cwd
-    ~options:(Y.make_options ~config_path_filter_map:Utils.map_path ())
+    ~options:(Y.make_options ~get_env_var ~config_path_filter_map:Utils.map_path ())
     ~of_yojson:Utils.foo_of_yojson "!CONFIG advanced.yml"
   |> Utils.render
   |> print_endline;
   [%expect
     {|
-    ((hello world) (abc DEF)
+    ((exists ("got it")) (missing ()) (abc DEF)
      (names
       (((name Alice)) ((name Bob)) ((name Charlie)) ((name Diane)) ((name Eric))))) |}]
