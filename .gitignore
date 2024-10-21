@@ -1,2 +1,5 @@
+**/.DS_Store
 _opam/
 _build/
+hlyaml.mac
+hlyaml.linux

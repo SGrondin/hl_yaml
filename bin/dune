@@ -1,0 +1,16 @@
+(executable
+  (name hlyaml)
+  (libraries
+    hl_yaml
+    eio_main
+  )
+  (preprocess (pps
+    ppx_jane
+  ))
+  (modes exe)
+  (ocamlopt_flags -O3)
+)
+
+(env
+  (dev
+    (flags (:standard -warn-error -A))))
