@@ -464,4 +464,55 @@ employees:
       - connection2
       - connection3 |}];
 
+  let* () =
+    let get_env_var _name = None in
+    {|
+hello: world
+!IF_DEF SOME_FLAG:
+  bye: !ENV SOME_VALUE
+!IF_NOT_DEF SOME_FLAG:
+  bye: world
+|}
+    |> test
+         ~options:
+           (Y.make_options ~enable_includes:false ~enable_conditional_includes:true ~get_env_var ())
+  in
+  [%expect {|
+    hello: world
+    bye: world
+    |}];
+
+  let* () =
+    let get_env_var = function
+      | "SOME_FLAG1" -> Some "1"
+      | _ -> None
+    in
+    {|
+keys:
+  - a
+  - !IF_DEF SOME_FLAG1:
+    - b
+    - c
+  - !IF_DEF SOME_FLAG2:
+    - d
+    - !ENV welp
+  - !IF_NOT_DEF SOME_FLAG2:
+    - d
+    - e
+  - z
+|}
+    |> test
+         ~options:
+           (Y.make_options ~enable_includes:false ~enable_conditional_includes:true ~get_env_var ())
+  in
+  [%expect {|
+    keys:
+    - a
+    - b
+    - c
+    - d
+    - e
+    - z
+    |}];
+
   Lwt.return_unit

@@ -226,11 +226,13 @@ module Make (IO : S.IO) = struct
                |`O { m_members = [ ((`Scalar { value = "<<"; _ } as left), right) ]; _ }
                 when is_include_allowed left -> (
                 (* !IF_DEF, !IF_NOT_DEF, or "<<" *)
-                let* right = process_anchor left (loop right) |> snd in
-                match check_flatten left, right with
-                | (true, _), `A { s_members; _ } -> IO.map_s loop s_members
-                | (false, _), _ -> IO.return []
-                | (true, _), yaml -> IO.return [ yaml ] )
+                let right = process_anchor left (loop right) |> snd in
+                match check_flatten left with
+                | false, _ -> IO.return []
+                | true, _ ->
+                  IO.bind right (function
+                    | `A { s_members; _ } -> IO.map_s loop s_members
+                    | yaml -> IO.return [ yaml ] ) )
               | yaml ->
                 (* Normal array element *)
                 loop yaml >|= fun x -> [ x ])
@@ -246,15 +248,17 @@ module Make (IO : S.IO) = struct
                |(`Scalar { value = "<<"; _ } as left), right
                 when is_include_allowed left -> (
                 (* !IF_DEF, !IF_NOT_DEF, or "<<" *)
-                let+ right = process_anchor left (loop right) |> snd in
-                match check_flatten left, right with
-                | (true, _), `O { m_members; _ } -> m_members
-                | (false, _), _ -> []
-                | (true, flatten_name), yaml ->
-                  failwithf
-                    "YAML error: right hand side of '%s' should be a list of key-value pairs but found:\n\
-                     %s"
-                    flatten_name (show_yaml_in_error yaml) () )
+                let right = process_anchor left (loop right) |> snd in
+                match check_flatten left with
+                | false, _ -> IO.return []
+                | true, flatten_name -> (
+                  right >|= function
+                  | `O { m_members; _ } -> m_members
+                  | yaml ->
+                    failwithf
+                      "YAML error: right hand side of '%s' should be a list of key-value pairs but found:\n\
+                       %s"
+                      flatten_name (show_yaml_in_error yaml) () ) )
               | left, right ->
                 (* Normal object key *)
                 let left, right = process_anchor left (loop right) in
